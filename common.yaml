@@ -26,6 +26,7 @@ esphome:
     version: ${fw_version}
   includes:
     - fronius_scan.h
+    - pv_data.h
   on_boot:
     - priority: -100
       then:
@@ -39,10 +40,7 @@ esphome:
             id: sw_auto_update
             state:
               checked: !lambda return id(auto_update).state;
-        - lvgl.label.update:
-            id: lbl_ip
-            text: !lambda |-
-              return id(fronius_ip).state.empty() ? std::string("nicht gesetzt") : id(fronius_ip).state;
+        - script.execute: update_ip_label
 
 logger:
   level: INFO
@@ -59,7 +57,10 @@ wifi:
   on_connect:
     - lvgl.widget.hide: hint_box
     - lambda: |-
-        if (id(fronius_ip).state.empty()) fronius_scan::start();
+        if (id(fronius_ip).state.empty() && id(fronius_ip2).state.empty() && id(fronius_ip3).state.empty()) {
+          id(scan_repair) = false;
+          fronius_scan::start();
+        }
   on_disconnect:
     - lvgl.widget.show: hint_box
 
@@ -131,9 +132,12 @@ time:
                       - update.perform: fw_update
 
 globals:
-  - id: fail_count
+  - id: poll_slot                 # welcher Wechselrichter gerade abgefragt wird (-1 = keiner)
     type: int
-    initial_value: "0"
+    initial_value: "-1"
+  - id: scan_repair               # true = automatische Suche, ersetzt nur fehlende Wechselrichter
+    type: bool
+    initial_value: "false"
   - id: flow_active               # Animation nur rechnen, wenn Seite sichtbar
     type: bool
     initial_value: "false"
@@ -142,10 +146,12 @@ globals:
 #  Einstellungen (dauerhaft gespeichert, auch über Weboberfläche änderbar)
 # ---------------------------------------------------------------------------
 
+# Bis zu drei Wechselrichter mit eigener Solar API (z. B. Gen24 + Symo).
+# Hängen mehrere an einem gemeinsamen Datamanager, nur dessen IP eintragen.
 text:
   - platform: template
     id: fronius_ip
-    name: Fronius IP
+    name: Fronius IP              # Name nicht ändern – sonst geht die gespeicherte IP verloren
     icon: mdi:solar-power
     mode: text
     optimistic: true
@@ -153,10 +159,32 @@ text:
     initial_value: ""
     max_length: 32
     on_value:
-      - lvgl.label.update:
-          id: lbl_ip
-          text: !lambda |-
-            return x.empty() ? std::string("nicht gesetzt") : x;
+      - lambda: pv::on_ip_changed(0, x);
+      - script.execute: update_ip_label
+  - platform: template
+    id: fronius_ip2
+    name: Fronius IP 2
+    icon: mdi:solar-power
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    max_length: 32
+    on_value:
+      - lambda: pv::on_ip_changed(1, x);
+      - script.execute: update_ip_label
+  - platform: template
+    id: fronius_ip3
+    name: Fronius IP 3
+    icon: mdi:solar-power
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    max_length: 32
+    on_value:
+      - lambda: pv::on_ip_changed(2, x);
+      - script.execute: update_ip_label
 
 number:
   - platform: template
@@ -202,7 +230,9 @@ button:
     name: Wechselrichter suchen
     icon: mdi:magnify
     on_press:
-      - lambda: fronius_scan::start();
+      - lambda: |-
+          id(scan_repair) = false;
+          fronius_scan::start();
   - platform: restart
     name: Neustart
 
@@ -225,11 +255,7 @@ binary_sensor:
   - platform: template
     id: fronius_online
     name: Fronius erreichbar
-    device_class: connectivity
-    on_state:
-      - lambda: |-
-          lv_obj_set_style_bg_color(id(dot_status),
-            x ? lv_color_hex(0x22C55E) : lv_color_hex(0xEF4444), 0);
+    device_class: connectivity      # an = alle eingetragenen Wechselrichter liefern Daten
 
 sensor:
   - platform: template
@@ -239,19 +265,14 @@ sensor:
     device_class: power
     update_interval: never
     on_value:
-      - lvgl.label.update:
-          id: lbl_pv
-          text:
-            format: "%.2f"
-            args: [ x / 1000.0f ]
+      # Unter 1 kW in Watt, darüber in kW (pv_data.h)
+      - lambda: |-
+          lv_label_set_text(id(lbl_pv), pv::power_value(x).c_str());
+          lv_label_set_text(id(lbl_pv_unit), pv::power_unit(x));
+          lv_label_set_text(id(lbl_f_pv), pv::power_text(x).c_str());
       - lvgl.arc.update:
           id: arc_pv
           value: !lambda return (int) std::min(100.0f, std::max(0.0f, x / (id(pv_peak).state * 10.0f)));
-      - lvgl.label.update:
-          id: lbl_f_pv
-          text:
-            format: "%.2f kW"
-            args: [ x / 1000.0f ]
 
   - platform: template
     id: p_grid
@@ -260,17 +281,10 @@ sensor:
     device_class: power
     update_interval: never
     on_value:
-      - lvgl.label.update:
-          id: lbl_grid
-          text:
-            format: "%.2f"
-            args: [ fabsf(x) / 1000.0f ]
-      - lvgl.label.update:
-          id: lbl_f_grid
-          text:
-            format: "%.2f kW"
-            args: [ fabsf(x) / 1000.0f ]
       - lambda: |-
+          lv_label_set_text(id(lbl_grid), pv::power_value(x).c_str());
+          lv_label_set_text(id(lbl_grid_unit), pv::power_unit(x));
+          lv_label_set_text(id(lbl_f_grid), pv::power_text(x).c_str());
           const char *sub = fabsf(x) < 20 ? "ausgeglichen" : (x > 0 ? "Bezug" : "Einspeisung");
           lv_label_set_text(id(lbl_grid_sub), sub);
           lv_label_set_text(id(lbl_f_grid_sub), sub);
@@ -287,16 +301,10 @@ sensor:
     device_class: power
     update_interval: never
     on_value:
-      - lvgl.label.update:
-          id: lbl_load
-          text:
-            format: "%.2f"
-            args: [ x / 1000.0f ]
-      - lvgl.label.update:
-          id: lbl_f_load
-          text:
-            format: "%.2f kW"
-            args: [ x / 1000.0f ]
+      - lambda: |-
+          lv_label_set_text(id(lbl_load), pv::power_value(x).c_str());
+          lv_label_set_text(id(lbl_load_unit), pv::power_unit(x));
+          lv_label_set_text(id(lbl_f_load), pv::power_text(x).c_str());
 
   - platform: template
     id: p_akku
@@ -306,11 +314,10 @@ sensor:
     update_interval: never
     on_value:
       - lambda: |-
-          char buf[32];
-          if (fabsf(x) < 20) snprintf(buf, sizeof(buf), "Standby");
-          else snprintf(buf, sizeof(buf), "%s %.2f kW", x < 0 ? "lädt" : "entlädt", fabsf(x) / 1000.0f);
-          lv_label_set_text(id(lbl_akku_sub), buf);
-          lv_label_set_text(id(lbl_f_akku), buf);
+          const std::string txt = fabsf(x) < 20 ? std::string("Standby")
+                                : std::string(x < 0 ? "lädt " : "entlädt ") + pv::power_text(x);
+          lv_label_set_text(id(lbl_akku_sub), txt.c_str());
+          lv_label_set_text(id(lbl_f_akku), txt.c_str());
 
   - platform: template
     id: soc
@@ -354,59 +361,95 @@ sensor:
             format: "Heute %.1f kWh"
             args: [ x ]
 
-interval:
-  # Fronius alle 5 s abfragen
-  - interval: 5s
+script:
+  # Werte aller Wechselrichter zusammenrechnen und anzeigen
+  - id: publish_totals
     then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const std::string ips[3] = {id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state};
+
+          int configured = 0, fresh = 0;
+          bool missing_long = false;
+          for (int i = 0; i < 3; i++) {
+            if (ips[i].empty()) continue;
+            configured++;
+            if (pv::is_fresh(pv::slots[i], now)) fresh++;
+            // last_ok == 0 heißt: seit dem Start nie erreicht -> zählt ab Systemstart
+            else if (pv::slots[i].fails >= pv::BACKOFF_AFTER && now - pv::slots[i].last_ok > 120000) missing_long = true;
+          }
+
+          // Status-Punkt: grün = alle, orange = einige, rot = keiner liefert Daten
+          const uint32_t col = fresh == 0 ? 0xEF4444 : (fresh < configured ? 0xF59E0B : 0x22C55E);
+          lv_obj_set_style_bg_color(id(dot_status), lv_color_hex(col), 0);
+          id(fronius_online).publish_state(configured > 0 && fresh == configured);
+
+          // Fehlt ein Wechselrichter länger als 2 min: automatisch neu suchen
+          // (IP evtl. per DHCP geändert), höchstens alle 10 min
+          static uint32_t last_auto_scan = 0;
+          if (missing_long && !fronius_scan::is_running() &&
+              (last_auto_scan == 0 || now - last_auto_scan > 600000)) {
+            last_auto_scan = now;
+            id(scan_repair) = true;
+            fronius_scan::start();
+          }
+
+          const pv::Totals t = pv::totals(now);
+          if (!t.valid) return;   // letzte Werte stehen lassen, Punkt ist rot
+          id(p_pv).publish_state(t.pv);
+          if (t.has_grid) id(p_grid).publish_state(t.grid);
+          id(p_load).publish_state(t.load);
+          if (t.has_akku) id(p_akku).publish_state(t.akku);
+          if (!std::isnan(t.soc)) id(soc).publish_state(t.soc);
+          if (!std::isnan(t.autarky)) id(autarkie).publish_state(t.autarky);
+          if (!std::isnan(t.eday_kwh)) id(e_day).publish_state(t.eday_kwh);
+
+  - id: update_ip_label
+    then:
+      - lambda: |-
+          const std::string txt = pv::ip_list({id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state});
+          lv_label_set_text(id(lbl_ip), txt.c_str());
+
+interval:
+  # Wechselrichter reihum abfragen: alle 2 s einer (bei zweien also je alle 4 s).
+  # Die Abfrage blockiert kurz – deshalb nie mehrere auf einmal.
+  - interval: 2s
+    then:
+      - lambda: |-
+          id(poll_slot) = -1;
+          if (!wifi::global_wifi_component->is_connected() || fronius_scan::is_running()) return;
+          const std::string ips[3] = {id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state};
+          static int last = -1;
+          const uint32_t now = millis();
+          for (int k = 1; k <= 3; k++) {
+            const int i = (last + k + 3) % 3;
+            if (!ips[i].empty() && pv::should_poll(i, now)) {
+              last = i;
+              id(poll_slot) = i;
+              pv::mark_try(i, now);
+              return;
+            }
+          }
       - if:
           condition:
-            and:
-              - wifi.connected:
-              - lambda: return !id(fronius_ip).state.empty() && !fronius_scan::is_running();
+            lambda: return id(poll_slot) >= 0;
           then:
             - http_request.get:
-                url: !lambda return "http://" + id(fronius_ip).state + "/solar_api/v1/GetPowerFlowRealtimeData.fcgi";
+                url: !lambda |-
+                  const std::string ips[3] = {id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state};
+                  return "http://" + ips[id(poll_slot)] + "/solar_api/v1/GetPowerFlowRealtimeData.fcgi";
                 capture_response: true
                 max_response_buffer_size: 4kB
                 on_response:
                   then:
                     - lambda: |-
-                        bool ok = false;
-                        if (response->status_code == 200) {
-                          ok = json::parse_json(body, [](JsonObject root) -> bool {
-                            JsonObject site = root["Body"]["Data"]["Site"];
-                            if (site.isNull()) return false;
-                            id(p_pv).publish_state(site["P_PV"] | 0.0f);
-                            id(p_grid).publish_state(site["P_Grid"] | 0.0f);
-                            id(p_load).publish_state(fabsf(site["P_Load"] | 0.0f));
-                            if (!site["P_Akku"].isNull())       id(p_akku).publish_state(site["P_Akku"].as<float>());
-                            if (!site["rel_Autonomy"].isNull()) id(autarkie).publish_state(site["rel_Autonomy"].as<float>());
-                            if (!site["E_Day"].isNull())        id(e_day).publish_state(site["E_Day"].as<float>() / 1000.0f);
-                            JsonObject inverters = root["Body"]["Data"]["Inverters"];
-                            for (JsonPair kv : inverters) {
-                              JsonVariant s = kv.value()["SOC"];
-                              if (!s.isNull()) { id(soc).publish_state(s.as<float>()); break; }
-                            }
-                            return true;
-                          });
-                        }
-                        id(fronius_online).publish_state(ok);
-                        if (ok) {
-                          id(fail_count) = 0;
-                        } else if (++id(fail_count) >= 24) {   // ~2 min keine Daten
-                          id(fail_count) = 0;
-                          fronius_scan::start();               // IP evtl. per DHCP geändert
-                        }
+                        const int i = id(poll_slot);
+                        if (response->status_code != 200 || !pv::parse(i, body, millis())) pv::mark_fail(i);
+                    - script.execute: publish_totals
                 on_error:
                   then:
-                    - binary_sensor.template.publish:
-                        id: fronius_online
-                        state: false
-                    - lambda: |-
-                        if (++id(fail_count) >= 24) {
-                          id(fail_count) = 0;
-                          fronius_scan::start();
-                        }
+                    - lambda: pv::mark_fail(id(poll_slot));
+                    - script.execute: publish_totals
 
   # Animation der Energiefluss-Seite (~25 fps, nur wenn sichtbar)
   - interval: 40ms
@@ -450,12 +493,39 @@ interval:
             lv_bar_set_value(id(bar_scan), fronius_scan::progress(), LV_ANIM_ON);
             lv_label_set_text_fmt(id(lbl_scan), "Suche läuft … %d %%", fronius_scan::progress());
           } else if (st == State::FOUND) {
-            const std::string ip = fronius_scan::take_result();
-            auto call = id(fronius_ip).make_call();
-            call.set_value(ip);
-            call.perform();
+            const std::vector<std::string> found = fronius_scan::take_results();
+            template_::TemplateText *fields[3] = {id(fronius_ip), id(fronius_ip2), id(fronius_ip3)};
+            auto set_ip = [&](int i, const std::string &ip) {
+              if (fields[i]->state == ip) return;
+              auto call = fields[i]->make_call();
+              call.set_value(ip);
+              call.perform();
+            };
+
+            if (!id(scan_repair)) {
+              // Manuelle Suche (oder Ersteinrichtung): Liste komplett übernehmen
+              for (int i = 0; i < 3; i++) set_ip(i, i < (int) found.size() ? found[i] : std::string());
+            } else {
+              // Automatische Suche: nur fehlende/leere Plätze mit neuen IPs füllen,
+              // damit ein kurz abgeschalteter Wechselrichter nicht aus der Liste fällt
+              const uint32_t now = millis();
+              for (const std::string &ip : found) {
+                bool known = false;
+                for (auto *f : fields) known |= (f->state == ip);
+                if (known) continue;
+                for (int i = 0; i < 3; i++) {
+                  const bool empty = fields[i]->state.empty();
+                  const bool dead = !empty && !pv::is_fresh(pv::slots[i], now) && pv::slots[i].fails >= pv::BACKOFF_AFTER;
+                  if (empty || dead) {
+                    set_ip(i, ip);
+                    break;
+                  }
+                }
+              }
+            }
             lv_bar_set_value(id(bar_scan), 100, LV_ANIM_ON);
-            lv_label_set_text_fmt(id(lbl_scan), "Gefunden: %s", ip.c_str());
+            if (found.size() == 1) lv_label_set_text(id(lbl_scan), "1 Wechselrichter gefunden");
+            else lv_label_set_text_fmt(id(lbl_scan), "%u Wechselrichter gefunden", (unsigned) found.size());
           } else if (st == State::NOT_FOUND && last != st) {
             lv_label_set_text(id(lbl_scan), "Kein Wechselrichter gefunden");
           }

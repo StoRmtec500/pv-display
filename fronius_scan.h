@@ -2,7 +2,7 @@
 // ---------------------------------------------------------------------------
 // Fronius-Netzwerksuche (Solar API v1)
 //
-// Sucht im lokalen /24-Netz nach einem Fronius-Wechselrichter:
+// Sucht im lokalen /24-Netz nach allen Fronius-Wechselrichtern (max. MAX_RESULTS):
 //   1. Schneller Port-80-Scan mit nicht-blockierenden Sockets (8 parallel)
 //   2. Geräte mit offenem Port 80 werden per GET /solar_api/GetAPIVersion.cgi
 //      geprüft – nur ein echter Fronius antwortet mit "BaseURL" + "solar_api".
@@ -36,11 +36,12 @@ static const char *const TAG = "fronius_scan";
 static constexpr size_t BATCH_SIZE = 8;          // parallele Verbindungsversuche
 static constexpr int CONNECT_TIMEOUT_MS = 400;   // pro Batch
 static constexpr int HTTP_TIMEOUT_MS = 1500;     // pro Kandidat
+static constexpr size_t MAX_RESULTS = 3;         // so viele Wechselrichter werden übernommen
 
 inline std::atomic<State> g_state{State::IDLE};
 inline std::atomic<int> g_progress{0};
 inline std::mutex g_mutex;
-inline std::string g_result;
+inline std::vector<std::string> g_results;
 
 inline std::string ip_to_string(uint32_t ip_host_order) {
   char buf[16];
@@ -140,7 +141,7 @@ inline void probe_batch(const uint32_t *ips, size_t count, std::vector<uint32_t>
 }
 
 inline void scan_task(void *) {
-  std::string result;
+  std::vector<std::string> results;
 
   esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   esp_netif_ip_info_t info = {};
@@ -166,11 +167,11 @@ inline void scan_task(void *) {
     }
     ESP_LOGI(TAG, "%u Geräte mit offenem Port 80", static_cast<unsigned>(open_hosts.size()));
 
-    // Phase 2: Solar-API-Prüfung (80–100 % Fortschritt)
-    for (size_t i = 0; i < open_hosts.size() && result.empty(); i++) {
+    // Phase 2: Solar-API-Prüfung (80–100 % Fortschritt) – alle Kandidaten prüfen
+    for (size_t i = 0; i < open_hosts.size() && results.size() < MAX_RESULTS; i++) {
       const std::string ip = ip_to_string(open_hosts[i]);
       if (is_fronius(ip)) {
-        result = ip;
+        results.push_back(ip);
         ESP_LOGI(TAG, "Fronius gefunden: %s", ip.c_str());
       }
       g_progress = 80 + static_cast<int>((i + 1) * 20 / open_hosts.size());
@@ -181,10 +182,10 @@ inline void scan_task(void *) {
 
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_result = result;
+    g_results = results;
   }
   g_progress = 100;
-  g_state = result.empty() ? State::NOT_FOUND : State::FOUND;
+  g_state = results.empty() ? State::NOT_FOUND : State::FOUND;
   vTaskDelete(nullptr);
 }
 
@@ -207,11 +208,11 @@ inline State state() { return g_state.load(); }
 inline int progress() { return g_progress.load(); }
 inline bool is_running() { return g_state == State::RUNNING; }
 
-// Liefert die gefundene IP und setzt den Status zurück auf IDLE.
-inline std::string take_result() {
+// Liefert die gefundenen IPs (aufsteigend sortiert) und setzt den Status zurück auf IDLE.
+inline std::vector<std::string> take_results() {
   std::lock_guard<std::mutex> lock(g_mutex);
   g_state = State::IDLE;
-  return g_result;
+  return g_results;
 }
 
 }  // namespace fronius_scan

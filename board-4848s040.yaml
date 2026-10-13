@@ -231,6 +231,7 @@ lvgl:
             text_font: font_xl
             text_color: 0xFACC15
         - label:
+            id: lbl_pv_unit
             align_to: { id: arc_pv, align: CENTER, y: 40 }
             text: "kW"
             text_font: font_m
@@ -252,7 +253,7 @@ lvgl:
             scrollable: false
             widgets:
               - label: { align: TOP_LEFT, text: "Haus", text_color: 0x94A3B8 }
-              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { id: lbl_load_unit, align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
               - label: { id: lbl_load, align: LEFT_MID, y: 6, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
               - label: { align: BOTTOM_LEFT, text: "Verbrauch", text_color: 0x64748B }
         - obj:
@@ -264,7 +265,7 @@ lvgl:
             scrollable: false
             widgets:
               - label: { align: TOP_LEFT, text: "Netz", text_color: 0x94A3B8 }
-              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { id: lbl_grid_unit, align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
               - label: { id: lbl_grid, align: LEFT_MID, y: 6, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
               - label: { id: lbl_grid_sub, align: BOTTOM_LEFT, text: "", text_color: 0x64748B }
         - obj:
@@ -438,8 +439,8 @@ lvgl:
             height: 150
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter", text_color: 0x94A3B8 }
-              - label: { id: lbl_ip, align: TOP_LEFT, y: 28, text: "nicht gesetzt", text_font: font_m, text_color: 0xF1F5F9 }
+              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter (max. 3)", text_color: 0x94A3B8 }
+              - label: { id: lbl_ip, align: TOP_LEFT, y: 28, width: 280, long_mode: DOT, text: "nicht gesetzt", text_font: font_m, text_color: 0xF1F5F9 }
               - button:
                   align: TOP_RIGHT
                   width: 130
