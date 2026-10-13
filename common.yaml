@@ -66,10 +66,15 @@ wifi:
 
 captive_portal:
 
+# Eigene Handy-Oberfläche (web/) statt der ESPHome-Standardseite.
+# Funktioniert ohne Internet; die ESPHome-Ansicht ist dort über
+# "Erweitert" zuschaltbar (lädt dann von oi.esphome.io).
 web_server:
   port: 80
   version: 3
-  local: true                       # Weboberfläche funktioniert ohne Internet
+  js_url: ""                        # Standardoberfläche nicht automatisch laden
+  js_include: web/dist/dashboard.js
+  css_include: web/dist/dashboard.css
 
 safe_mode:
 
@@ -233,10 +238,24 @@ button:
       - lambda: |-
           id(scan_repair) = false;
           fronius_scan::start();
+  # Für die Handy-Oberfläche: die Update-Entität kann per REST nur installieren
+  - platform: template
+    name: Nach Updates suchen
+    icon: mdi:update
+    entity_category: config
+    on_press:
+      - component.update: fw_update
   - platform: restart
     name: Neustart
 
 text_sensor:
+  # Fortschritt der Wechselrichter-Suche – für die Handy-Oberfläche
+  - platform: template
+    id: scan_status
+    name: Suchstatus
+    icon: mdi:magnify
+    entity_category: diagnostic
+    update_interval: never
   - platform: wifi_info
     ip_address:
       id: own_ip
@@ -489,9 +508,10 @@ interval:
           static State last = State::IDLE;
           const State st = fronius_scan::state();
 
+          std::string msg;
           if (st == State::RUNNING) {
             lv_bar_set_value(id(bar_scan), fronius_scan::progress(), LV_ANIM_ON);
-            lv_label_set_text_fmt(id(lbl_scan), "Suche läuft … %d %%", fronius_scan::progress());
+            msg = str_sprintf("Suche läuft … %d %%", fronius_scan::progress());
           } else if (st == State::FOUND) {
             const std::vector<std::string> found = fronius_scan::take_results();
             template_::TemplateText *fields[3] = {id(fronius_ip), id(fronius_ip2), id(fronius_ip3)};
@@ -524,10 +544,15 @@ interval:
               }
             }
             lv_bar_set_value(id(bar_scan), 100, LV_ANIM_ON);
-            if (found.size() == 1) lv_label_set_text(id(lbl_scan), "1 Wechselrichter gefunden");
-            else lv_label_set_text_fmt(id(lbl_scan), "%u Wechselrichter gefunden", (unsigned) found.size());
+            msg = found.size() == 1 ? std::string("1 Wechselrichter gefunden")
+                                    : str_sprintf("%u Wechselrichter gefunden", (unsigned) found.size());
           } else if (st == State::NOT_FOUND && last != st) {
-            lv_label_set_text(id(lbl_scan), "Kein Wechselrichter gefunden");
+            msg = "Kein Wechselrichter gefunden";
           }
           last = st;
+          // Display und Handy-Oberfläche nur bei Änderung aktualisieren
+          if (!msg.empty() && msg != id(scan_status).state) {
+            lv_label_set_text(id(lbl_scan), msg.c_str());
+            id(scan_status).publish_state(msg);
+          }
 

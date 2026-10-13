@@ -1,0 +1,6 @@
+/* Tailwind v4 – scannt dashboard.ts nach verwendeten Klassen */
+@import "tailwindcss";
+@source "./dashboard.ts";
+
+/* aria-checked:… für den Schalter */
+@custom-variant aria-checked (&[aria-checked="true"]);

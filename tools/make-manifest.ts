@@ -5,7 +5,7 @@
  * Aufruf:
  *   tsx tools/make-manifest.ts \
  *     --dir site/pv-display --base-url https://update.mksoft.at/pv-display \
- *     --name "PV Display" --version 1.2.0 \
+ *     --name "PV Display" --version 1.2.0 --chip ESP32-S3 \
  *     --ota pv-display-1.2.0.ota.bin --factory pv-display-1.2.0.factory.bin \
  *     --summary "Energiefluss-Seite" --release-url https://github.com/...
  */
@@ -26,8 +26,13 @@ interface FlashPart {
   offset: number;
 }
 
+// Muss exakt dem ESPHome-Variantennamen entsprechen (ESPHOME_VARIANT),
+// sonst findet das Gerät keinen passenden Build im Manifest.
+const CHIP_FAMILIES = ['ESP32', 'ESP32-S2', 'ESP32-S3', 'ESP32-C3', 'ESP32-C6'] as const;
+type ChipFamily = (typeof CHIP_FAMILIES)[number];
+
 interface ManifestBuild {
-  chipFamily: 'ESP32-S3';
+  chipFamily: ChipFamily;
   ota: OtaInfo;
   parts: FlashPart[];
 }
@@ -45,6 +50,7 @@ interface CliOptions {
   baseUrl: string;
   name: string;
   version: string;
+  chip: ChipFamily;
   ota: string;
   factory: string;
   summary: string;
@@ -60,6 +66,7 @@ function readOptions(): CliOptions {
       'base-url': { type: 'string' },
       name: { type: 'string' },
       version: { type: 'string' },
+      chip: { type: 'string' },
       ota: { type: 'string' },
       factory: { type: 'string' },
       summary: { type: 'string' },
@@ -68,7 +75,7 @@ function readOptions(): CliOptions {
     strict: true,
   });
 
-  const required = ['dir', 'base-url', 'name', 'version', 'ota', 'factory'] as const;
+  const required = ['dir', 'base-url', 'name', 'version', 'chip', 'ota', 'factory'] as const;
   const missing = required.filter((key) => !values[key]);
   if (missing.length > 0) {
     throw new Error(`Fehlende Parameter: ${missing.map((m) => `--${m}`).join(', ')}`);
@@ -79,11 +86,17 @@ function readOptions(): CliOptions {
     throw new Error(`Ungültige Version "${version}" – erwartet z. B. 1.2.0 oder 1.2.0-beta.1`);
   }
 
+  const chip = values.chip as string;
+  if (!(CHIP_FAMILIES as readonly string[]).includes(chip)) {
+    throw new Error(`Unbekannter Chip "${chip}" – erlaubt: ${CHIP_FAMILIES.join(', ')}`);
+  }
+
   return {
     dir: values.dir as string,
     baseUrl: (values['base-url'] as string).replace(/\/+$/, ''),
     name: values.name as string,
     version,
+    chip: chip as ChipFamily,
     ota: values.ota as string,
     factory: values.factory as string,
     summary: values.summary?.trim() || `Version ${version}`,
@@ -109,7 +122,7 @@ async function main(): Promise<void> {
     new_install_prompt_erase: true,
     builds: [
       {
-        chipFamily: 'ESP32-S3',
+        chipFamily: opts.chip,
         ota: {
           path: `${opts.baseUrl}/${opts.ota}`,
           md5,

@@ -23,3 +23,15 @@ touchscreen:
       - lambda: |-
           for (auto t : touches)
             ESP_LOGI("touch", "x=%d y=%d  raw_x=%d raw_y=%d", t.x, t.y, t.x_raw, t.y_raw);
+
+# Speicheranzeige im Log und in der Weboberfläche ("Erweitert").
+# Für HTTPS-Updates sollte "Größter Block" über ~40 KB liegen.
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: debug
+    free:
+      name: Heap frei
+    block:
+      name: Heap größter Block

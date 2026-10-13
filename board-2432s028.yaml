@@ -37,6 +37,11 @@ esp32:
     type: esp-idf
     sdkconfig_options:
       CONFIG_LWIP_MAX_SOCKETS: "16"    # Reserve für parallelen Netzwerk-Scan
+      # Kein PSRAM: HTTPS (Update-Manifest) braucht sonst ~40 KB freien Speicher
+      # am Stück. Dynamische TLS-Puffer belegen RAM nur während der Verbindung.
+      CONFIG_MBEDTLS_DYNAMIC_BUFFER: y
+      CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA: y
+      CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT: y
 
 # ---------------------------------------------------------------------------
 #  Hardware: Display, Touch, Hintergrundbeleuchtung, RGB-LED

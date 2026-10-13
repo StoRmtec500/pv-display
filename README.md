@@ -11,15 +11,31 @@ Fronius-PV-Anzeige auf ESP32-Touchdisplays mit ESPHome, ohne Home Assistant.
 | `board-4848s040.yaml` | Guition ESP32-4848S040 – 4", 480×480 |
 | `board-2432s028.yaml` | ESP32-2432S028 („Cheap Yellow Display“) – 2,8", 320×240 |
 | `dev-*.yaml` | Entwicklungs-Builds mit Netzwerk-OTA und Debug-Log (nie verteilen) |
+| `pv_data.h` | Summen über mehrere Wechselrichter, Watt/kW-Formatierung |
+| `web/src/` | Handy-Oberfläche (TypeScript + Tailwind), gebaut nach `web/dist/` |
 | `tools/make-manifest.ts` | Erzeugt das Update-Manifest |
 
 Beide Board-Oberflächen verwenden dieselben Widget-IDs (`lbl_pv`, `arc_pv`, `dot_pv` …),
 damit `common.yaml` sie befüllen kann. Ein neues Board braucht alle diese IDs.
 
+## Handy-Oberfläche
+
+Im Browser die IP des Displays öffnen (steht in den Einstellungen am Display).
+Übersicht und Einstellungen laufen ohne Internet. „Erweitert“ lädt die
+ESPHome-Standardansicht nach (braucht Internet am Handy).
+
+Nach Änderungen in `web/src/`:
+
+```bash
+npm install
+npm run build:web                         # erzeugt web/dist/ – mit einchecken
+```
+
 ## Lokal bauen und flashen
 
 ```bash
 cp secrets.yaml.example secrets.yaml      # OTA-Passwort setzen
+npm install && npm run build:web
 esphome run dev-4848s040.yaml             # oder dev-2432s028.yaml
 ```
 

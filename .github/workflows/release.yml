@@ -70,9 +70,11 @@ jobs:
           - config: board-4848s040.yaml
             device: pv-display          # bestehender Pfad – nicht ändern
             title: PV Display 4"
+            chip: ESP32-S3              # muss zum Chip passen, sonst kein Update
           - config: board-2432s028.yaml
             device: pv-display-cyd
             title: PV Display 2.8"
+            chip: ESP32
     steps:
       - uses: actions/checkout@v4
 
@@ -99,6 +101,13 @@ jobs:
         env:
           ESPHOME_VERSION: ${{ vars.ESPHOME_VERSION }}
         run: pip install "esphome${ESPHOME_VERSION:+==$ESPHOME_VERSION}"
+
+      # Handy-Oberfläche (web/src) neu bauen, damit web/dist zum Stand passt
+      - name: Weboberfläche bauen
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build:web
 
       - name: Firmware kompilieren
         env:
@@ -128,16 +137,16 @@ jobs:
           DEVICE: ${{ matrix.device }}
           V: ${{ needs.version.outputs.version }}
           TITLE: ${{ matrix.title }}
+          CHIP: ${{ matrix.chip }}
           SUMMARY: ${{ needs.version.outputs.summary }}
           RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.version.outputs.version }}
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
           npm run manifest -- \
             --dir "site/$DEVICE" \
             --base-url "$BASE_URL/$DEVICE" \
             --name "$TITLE" \
             --version "$V" \
+            --chip "$CHIP" \
             --ota "$DEVICE-$V.ota.bin" \
             --factory "$DEVICE-$V.factory.bin" \
             --summary "$SUMMARY" \

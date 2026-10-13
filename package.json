@@ -3,12 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:web": "tsc -p web/tsconfig.json && tailwindcss -i web/src/styles.css -o web/dist/dashboard.css --minify",
     "manifest": "tsx tools/make-manifest.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@tailwindcss/cli": "4.1.13",
+    "tailwindcss": "4.1.13"
   }
 }
