@@ -1,0 +1,971 @@
+# ===========================================================================
+#  mksoft PV-Display – Fronius-Anzeige für ESP32-S3 4" (Guition 4848S040)
+#  Standalone: kein Home Assistant nötig
+# ===========================================================================
+
+substitutions:
+  name: pv-display
+  friendly_name: PV Display
+  fw_version: "0.0.0-dev"           # wird beim Release vom Git-Tag überschrieben
+  update_manifest: https://update.mksoft.at/pv-display/manifest.json
+  setup_ssid: PV-Display-Setup
+  setup_password: mksoft-setup      # steht in der Kundenanleitung
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true         # eindeutiger Hostname je Gerät
+  min_version: 2025.7.0
+  project:
+    name: mksoft.pv-display
+    version: ${fw_version}
+  includes:
+    - fronius_scan.h
+  on_boot:
+    - priority: -100
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: !lambda return id(brightness).state / 100.0f;
+        - lvgl.slider.update:
+            id: sld_brightness
+            value: !lambda return id(brightness).state;
+        - lvgl.widget.update:
+            id: sw_auto_update
+            state:
+              checked: !lambda return id(auto_update).state;
+        - lvgl.label.update:
+            id: lbl_ip
+            text: !lambda |-
+              return id(fronius_ip).state.empty() ? std::string("nicht gesetzt") : id(fronius_ip).state;
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+      CONFIG_ESP32S3_DATA_CACHE_64KB: y
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+      CONFIG_LWIP_MAX_SOCKETS: "16"    # Reserve für parallelen Netzwerk-Scan
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+
+# ---------------------------------------------------------------------------
+#  Netzwerk, Einrichtung, Updates
+# ---------------------------------------------------------------------------
+
+wifi:
+  # Keine fest eingetragenen Netze: der Kunde richtet WLAN über den Hotspot ein
+  ap:
+    ssid: ${setup_ssid}
+    password: ${setup_password}
+  on_connect:
+    - lvgl.widget.hide: hint_box
+    - lambda: |-
+        if (id(fronius_ip).state.empty()) fronius_scan::start();
+  on_disconnect:
+    - lvgl.widget.show: hint_box
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  local: true                       # Weboberfläche funktioniert ohne Internet
+
+safe_mode:
+
+# Release-Firmware: Updates nur vom eigenen Update-Server.
+# Netzwerk-OTA aus ESPHome gibt es nur im Entwicklungs-Build (pv-display-dev.yaml),
+# weil die Release-Firmware öffentlich herunterladbar ist und ein darin
+# enthaltenes OTA-Passwort ausgelesen werden könnte.
+ota:
+  - platform: http_request
+
+http_request:
+  useragent: pv-display/${fw_version}
+  timeout: 3s
+  verify_ssl: true
+
+update:
+  - platform: http_request
+    id: fw_update
+    name: Firmware
+    source: ${update_manifest}
+    update_interval: 6h
+    on_update_available:
+      - lvgl.label.update:
+          id: lbl_update_btn
+          text: !lambda return std::string("Update ") + id(fw_update).update_info.latest_version;
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Vienna
+    servers:
+      - 0.at.pool.ntp.org
+      - 1.at.pool.ntp.org
+      - pool.ntp.org
+    on_time_sync:
+      - lvgl.label.update:
+          id: lbl_time
+          text: !lambda return id(sntp_time).now().strftime("%H:%M");
+    on_time:
+      - seconds: 0
+        then:
+          - lvgl.label.update:
+              id: lbl_time
+              text: !lambda return id(sntp_time).now().strftime("%H:%M");
+      # Nächtliches Auto-Update um 03:17
+      - seconds: 0
+        minutes: 17
+        hours: 3
+        then:
+          - if:
+              condition:
+                switch.is_on: auto_update
+              then:
+                - component.update: fw_update
+                - delay: 30s
+                - if:
+                    condition:
+                      update.is_available: fw_update
+                    then:
+                      - update.perform: fw_update
+
+globals:
+  - id: fail_count
+    type: int
+    initial_value: "0"
+  - id: flow_active               # Animation nur rechnen, wenn Seite sichtbar
+    type: bool
+    initial_value: "false"
+
+# ---------------------------------------------------------------------------
+#  Einstellungen (dauerhaft gespeichert, auch über Weboberfläche änderbar)
+# ---------------------------------------------------------------------------
+
+text:
+  - platform: template
+    id: fronius_ip
+    name: Fronius IP
+    icon: mdi:solar-power
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    max_length: 32
+    on_value:
+      - lvgl.label.update:
+          id: lbl_ip
+          text: !lambda |-
+            return x.empty() ? std::string("nicht gesetzt") : x;
+
+number:
+  - platform: template
+    id: brightness
+    name: Helligkeit
+    icon: mdi:brightness-6
+    min_value: 10
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    optimistic: true
+    restore_value: true
+    initial_value: 80
+    on_value:
+      - light.turn_on:
+          id: backlight
+          brightness: !lambda return x / 100.0f;
+
+  # Spitzenleistung der Anlage – Basis für den Ring auf der Hauptseite
+  - platform: template
+    id: pv_peak
+    name: Anlagenleistung
+    icon: mdi:solar-panel-large
+    mode: box
+    min_value: 1
+    max_value: 100
+    step: 0.1
+    unit_of_measurement: kWp
+    optimistic: true
+    restore_value: true
+    initial_value: 10
+
+switch:
+  - platform: template
+    id: auto_update
+    name: Automatische Updates
+    icon: mdi:update
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+button:
+  - platform: template
+    name: Wechselrichter suchen
+    icon: mdi:magnify
+    on_press:
+      - lambda: fronius_scan::start();
+  - platform: restart
+    name: Neustart
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: own_ip
+      on_value:
+        - lvgl.label.update:
+            id: lbl_web
+            text:
+              format: "Web: http://%s"
+              args: [ x.c_str() ]
+
+# ---------------------------------------------------------------------------
+#  Fronius-Daten
+# ---------------------------------------------------------------------------
+
+binary_sensor:
+  - platform: template
+    id: fronius_online
+    name: Fronius erreichbar
+    device_class: connectivity
+    on_state:
+      - lambda: |-
+          lv_obj_set_style_bg_color(id(dot_status),
+            x ? lv_color_hex(0x22C55E) : lv_color_hex(0xEF4444), 0);
+
+sensor:
+  - platform: template
+    id: p_pv
+    name: PV Leistung
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_pv
+          text:
+            format: "%.2f"
+            args: [ x / 1000.0f ]
+      - lvgl.arc.update:
+          id: arc_pv
+          value: !lambda return (int) std::min(100.0f, std::max(0.0f, x / (id(pv_peak).state * 10.0f)));
+      - lvgl.label.update:
+          id: lbl_f_pv
+          text:
+            format: "%.2f kW"
+            args: [ x / 1000.0f ]
+
+  - platform: template
+    id: p_grid
+    name: Netz
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_grid
+          text:
+            format: "%.2f"
+            args: [ fabsf(x) / 1000.0f ]
+      - lvgl.label.update:
+          id: lbl_f_grid
+          text:
+            format: "%.2f kW"
+            args: [ fabsf(x) / 1000.0f ]
+      - lambda: |-
+          const char *sub = fabsf(x) < 20 ? "ausgeglichen" : (x > 0 ? "Bezug" : "Einspeisung");
+          lv_label_set_text(id(lbl_grid_sub), sub);
+          lv_label_set_text(id(lbl_f_grid_sub), sub);
+          lv_color_t c = fabsf(x) < 20 ? lv_color_hex(0xF1F5F9)
+                       : (x > 0 ? lv_color_hex(0xF87171) : lv_color_hex(0x4ADE80));
+          lv_obj_set_style_text_color(id(lbl_grid), c, 0);
+          lv_obj_set_style_text_color(id(lbl_f_grid), c, 0);
+          lv_obj_set_style_bg_color(id(dot_grid), c, 0);
+
+  - platform: template
+    id: p_load
+    name: Verbrauch
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_load
+          text:
+            format: "%.2f"
+            args: [ x / 1000.0f ]
+      - lvgl.label.update:
+          id: lbl_f_load
+          text:
+            format: "%.2f kW"
+            args: [ x / 1000.0f ]
+
+  - platform: template
+    id: p_akku
+    name: Akku Leistung
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lambda: |-
+          char buf[32];
+          if (fabsf(x) < 20) snprintf(buf, sizeof(buf), "Standby");
+          else snprintf(buf, sizeof(buf), "%s %.2f kW", x < 0 ? "lädt" : "entlädt", fabsf(x) / 1000.0f);
+          lv_label_set_text(id(lbl_akku_sub), buf);
+          lv_label_set_text(id(lbl_f_akku), buf);
+
+  - platform: template
+    id: soc
+    name: Akku Ladestand
+    unit_of_measurement: "%"
+    device_class: battery
+    update_interval: never
+    on_value:
+      # Texte mit Prozentzeichen als Lambda: ESPHomes format-Prüfung
+      # verwechselt "%%" mit einem Platzhalter
+      - lvgl.label.update:
+          id: lbl_soc
+          text: !lambda |-
+            return str_sprintf("%.0f%%", x);
+      - lvgl.label.update:
+          id: lbl_f_soc
+          text: !lambda |-
+            return str_sprintf("%.0f %%", x);
+
+  - platform: template
+    id: autarkie
+    name: Autarkie
+    unit_of_measurement: "%"
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_autarkie
+          text: !lambda |-
+            return str_sprintf("%.0f %% autark", x);
+
+  - platform: template
+    id: e_day
+    name: Ertrag heute
+    unit_of_measurement: kWh
+    device_class: energy
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_eday
+          text:
+            format: "Heute %.1f kWh"
+            args: [ x ]
+
+interval:
+  # Fronius alle 5 s abfragen
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            and:
+              - wifi.connected:
+              - lambda: return !id(fronius_ip).state.empty() && !fronius_scan::is_running();
+          then:
+            - http_request.get:
+                url: !lambda return "http://" + id(fronius_ip).state + "/solar_api/v1/GetPowerFlowRealtimeData.fcgi";
+                capture_response: true
+                max_response_buffer_size: 4kB
+                on_response:
+                  then:
+                    - lambda: |-
+                        bool ok = false;
+                        if (response->status_code == 200) {
+                          ok = json::parse_json(body, [](JsonObject root) -> bool {
+                            JsonObject site = root["Body"]["Data"]["Site"];
+                            if (site.isNull()) return false;
+                            id(p_pv).publish_state(site["P_PV"] | 0.0f);
+                            id(p_grid).publish_state(site["P_Grid"] | 0.0f);
+                            id(p_load).publish_state(fabsf(site["P_Load"] | 0.0f));
+                            if (!site["P_Akku"].isNull())       id(p_akku).publish_state(site["P_Akku"].as<float>());
+                            if (!site["rel_Autonomy"].isNull()) id(autarkie).publish_state(site["rel_Autonomy"].as<float>());
+                            if (!site["E_Day"].isNull())        id(e_day).publish_state(site["E_Day"].as<float>() / 1000.0f);
+                            JsonObject inverters = root["Body"]["Data"]["Inverters"];
+                            for (JsonPair kv : inverters) {
+                              JsonVariant s = kv.value()["SOC"];
+                              if (!s.isNull()) { id(soc).publish_state(s.as<float>()); break; }
+                            }
+                            return true;
+                          });
+                        }
+                        id(fronius_online).publish_state(ok);
+                        if (ok) {
+                          id(fail_count) = 0;
+                        } else if (++id(fail_count) >= 24) {   // ~2 min keine Daten
+                          id(fail_count) = 0;
+                          fronius_scan::start();               // IP evtl. per DHCP geändert
+                        }
+                on_error:
+                  then:
+                    - binary_sensor.template.publish:
+                        id: fronius_online
+                        state: false
+                    - lambda: |-
+                        if (++id(fail_count) >= 24) {
+                          id(fail_count) = 0;
+                          fronius_scan::start();
+                        }
+
+  # Animation der Energiefluss-Seite (~25 fps, nur wenn sichtbar)
+  - interval: 40ms
+    then:
+      - lambda: |-
+          if (!id(flow_active)) return;
+          static float phase[4] = {0.0f, 0.25f, 0.5f, 0.75f};
+
+          // Mehr Leistung = schnellere Punkte
+          auto move = [&](lv_obj_t *dot, int i, float x0, float y0, float x1, float y1,
+                          float power, bool towards_end) {
+            if (std::isnan(power) || fabsf(power) < 20) {
+              lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+              return;
+            }
+            lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+            phase[i] += 0.012f + std::min(fabsf(power) / 6000.0f, 1.0f) * 0.035f;
+            if (phase[i] >= 1.0f) phase[i] -= 1.0f;
+            const float t = towards_end ? phase[i] : 1.0f - phase[i];
+            lv_obj_set_pos(dot, (lv_coord_t) (x0 + (x1 - x0) * t - 7),
+                                (lv_coord_t) (y0 + (y1 - y0) * t - 7));
+          };
+
+          // Alle Segmente laufen Knoten -> Mitte (240/250), Haus: Mitte -> Knoten
+          const float g = id(p_grid).state;   // > 0 Bezug, < 0 Einspeisung
+          const float a = id(p_akku).state;   // > 0 entlädt, < 0 lädt
+          move(id(dot_pv),   0, 240, 150, 240, 250, id(p_pv).state, true);
+          move(id(dot_grid), 1, 130, 250, 240, 250, g, g > 0);
+          move(id(dot_akku), 2, 350, 250, 240, 250, a, a > 0);
+          move(id(dot_haus), 3, 240, 250, 240, 350, id(p_load).state, true);
+
+  # Fortschritt der Wechselrichter-Suche ins Display übernehmen
+  - interval: 300ms
+    then:
+      - lambda: |-
+          using fronius_scan::State;
+          static State last = State::IDLE;
+          const State st = fronius_scan::state();
+
+          if (st == State::RUNNING) {
+            lv_bar_set_value(id(bar_scan), fronius_scan::progress(), LV_ANIM_ON);
+            lv_label_set_text_fmt(id(lbl_scan), "Suche läuft … %d %%", fronius_scan::progress());
+          } else if (st == State::FOUND) {
+            const std::string ip = fronius_scan::take_result();
+            auto call = id(fronius_ip).make_call();
+            call.set_value(ip);
+            call.perform();
+            lv_bar_set_value(id(bar_scan), 100, LV_ANIM_ON);
+            lv_label_set_text_fmt(id(lbl_scan), "Gefunden: %s", ip.c_str());
+          } else if (st == State::NOT_FOUND && last != st) {
+            lv_label_set_text(id(lbl_scan), "Kein Wechselrichter gefunden");
+          }
+          last = st;
+
+# ---------------------------------------------------------------------------
+#  Hardware: Display, Touch, Hintergrundbeleuchtung
+# ---------------------------------------------------------------------------
+
+spi:
+  clk_pin: GPIO48
+  mosi_pin: GPIO47
+
+display:
+  - platform: mipi_rgb
+    model: GUITION-4848S040
+    id: main_display
+    auto_clear_enabled: false
+    update_interval: never
+
+i2c:
+  sda: GPIO19
+  scl: GPIO45
+
+touchscreen:
+  - platform: gt911
+    id: touch
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_out
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Display Beleuchtung
+    output: backlight_out
+    restore_mode: ALWAYS_ON
+    default_transition_length: 250ms
+
+# ---------------------------------------------------------------------------
+#  Schriften (mit Umlauten)
+# ---------------------------------------------------------------------------
+
+font:
+  - file: { type: gfonts, family: Inter, weight: 500 }
+    id: font_s
+    size: 16
+    bpp: 4
+    glyphsets: [GF_Latin_Core]
+  - file: { type: gfonts, family: Inter, weight: 600 }
+    id: font_m
+    size: 22
+    bpp: 4
+    glyphsets: [GF_Latin_Core]
+  - file: { type: gfonts, family: Inter, weight: 700 }
+    id: font_l
+    size: 30
+    bpp: 4
+    glyphs: "0123456789.,-% "
+  - file: { type: gfonts, family: Inter, weight: 700 }
+    id: font_xl
+    size: 64
+    bpp: 4
+    glyphs: "0123456789.,-"
+  # Icons: Material Design Icons
+  - file:
+      type: web
+      url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
+    id: font_icon
+    size: 40
+    bpp: 4
+    glyphs:
+      - "\U000F0A72"   # solar-power
+      - "\U000F0D3E"   # transmission-tower
+      - "\U000F0079"   # battery
+      - "\U000F02DC"   # home
+  - file:
+      type: web
+      url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
+    id: font_icon_s
+    size: 26
+    bpp: 4
+    glyphs:
+      - "\U000F0A72"   # solar-power
+
+# ---------------------------------------------------------------------------
+#  Oberfläche (480 × 480)
+# ---------------------------------------------------------------------------
+
+lvgl:
+  displays: [main_display]
+  touchscreens: [touch]
+  buffer_size: 100%
+  default_font: font_s
+
+  style_definitions:
+    - id: st_card
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 18
+      border_width: 0
+      pad_all: 12
+    - id: st_btn
+      bg_color: 0x334155
+      radius: 12
+      border_width: 0
+      shadow_width: 0
+
+  pages:
+    # ======================= Hauptseite =======================
+    - id: page_main
+      bg_color: 0x0B1120
+      widgets:
+        - label:
+            id: lbl_time
+            align: TOP_LEFT
+            x: 20
+            y: 18
+            text: "--:--"
+            text_font: font_m
+            text_color: 0xE2E8F0
+        - label:
+            id: lbl_eday
+            align: TOP_MID
+            y: 22
+            text: ""
+            text_color: 0x94A3B8
+        - button:
+            align: TOP_RIGHT
+            x: -68
+            y: 8
+            width: 48
+            height: 48
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_flow
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\U000F0A72"
+                  text_font: font_icon_s
+                  text_color: 0xFACC15
+        - obj:
+            id: dot_status
+            align: TOP_RIGHT
+            x: -128
+            y: 26
+            width: 12
+            height: 12
+            radius: 6
+            border_width: 0
+            bg_color: 0xEF4444
+        - button:
+            align: TOP_RIGHT
+            x: -12
+            y: 8
+            width: 48
+            height: 48
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_settings
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF013"
+                  text_font: montserrat_24
+                  text_color: 0xE2E8F0
+
+        # Ring = aktuelle PV-Leistung im Verhältnis zur Anlagenleistung (kWp)
+        - arc:
+            id: arc_pv
+            align: TOP_MID
+            y: 66
+            width: 250
+            height: 250
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            arc_color: 0x1E293B
+            arc_width: 16
+            indicator:
+              arc_color: 0xFACC15
+              arc_width: 16
+            knob:
+              bg_opa: TRANSP
+        - label:
+            align_to: { id: arc_pv, align: CENTER, y: -52 }
+            text: "PV-Leistung"
+            text_color: 0x94A3B8
+        - label:
+            id: lbl_pv
+            align_to: { id: arc_pv, align: CENTER, y: -4 }
+            text: "--"
+            text_font: font_xl
+            text_color: 0xFACC15
+        - label:
+            align_to: { id: arc_pv, align: CENTER, y: 40 }
+            text: "kW"
+            text_font: font_m
+            text_color: 0x94A3B8
+        - label:
+            id: lbl_autarkie
+            align_to: { id: arc_pv, align: CENTER, y: 76 }
+            text: ""
+            text_color: 0x4ADE80
+
+        # Kacheln: Haus / Netz / Akku
+        - obj:
+            styles: st_card
+            align: BOTTOM_LEFT
+            x: 18
+            y: -18
+            width: 140
+            height: 118
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Haus", text_color: 0x94A3B8 }
+              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { id: lbl_load, align: LEFT_MID, y: 6, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - label: { align: BOTTOM_LEFT, text: "Verbrauch", text_color: 0x64748B }
+        - obj:
+            styles: st_card
+            align: BOTTOM_MID
+            y: -18
+            width: 140
+            height: 118
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Netz", text_color: 0x94A3B8 }
+              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { id: lbl_grid, align: LEFT_MID, y: 6, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - label: { id: lbl_grid_sub, align: BOTTOM_LEFT, text: "", text_color: 0x64748B }
+        - obj:
+            styles: st_card
+            align: BOTTOM_RIGHT
+            x: -18
+            y: -18
+            width: 140
+            height: 118
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Akku", text_color: 0x94A3B8 }
+              - label: { id: lbl_soc, align: LEFT_MID, y: 6, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - label: { id: lbl_akku_sub, align: BOTTOM_LEFT, text: "kein Akku", text_color: 0x64748B }
+
+        # Hinweis bei fehlendem WLAN (überdeckt die Kacheln)
+        - obj:
+            id: hint_box
+            styles: st_card
+            bg_color: 0x1E3A8A
+            align: BOTTOM_MID
+            y: -18
+            width: 444
+            height: 118
+            scrollable: false
+            widgets:
+              - label:
+                  width: 100%
+                  long_mode: WRAP
+                  align: CENTER
+                  text_align: CENTER
+                  text_color: 0xF1F5F9
+                  text: "WLAN einrichten: Mit dem Handy das WLAN „${setup_ssid}“ verbinden (Passwort: ${setup_password}) und den Anweisungen folgen."
+
+    # ======================= Energiefluss =======================
+    # Knoten: PV oben, Netz links, Akku rechts, Haus unten; Mitte bei (240/250)
+    - id: page_flow
+      bg_color: 0x0B1120
+      on_load:
+        - lambda: id(flow_active) = true;
+      on_unload:
+        - lambda: id(flow_active) = false;
+      widgets:
+        - button:
+            align: TOP_LEFT
+            x: 12
+            y: 8
+            width: 48
+            height: 48
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_main
+            widgets:
+              - label:
+                  align: CENTER
+                  text: ""
+                  text_font: montserrat_24
+                  text_color: 0xE2E8F0
+        - label:
+            align: TOP_MID
+            y: 20
+            text: "Energiefluss"
+            text_font: font_m
+            text_color: 0xF1F5F9
+
+        # Leitungen (Knoten -> Mitte)
+        - line: { points: ["240, 150", "240, 250"], line_width: 4, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["130, 250", "240, 250"], line_width: 4, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["350, 250", "240, 250"], line_width: 4, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["240, 250", "240, 350"], line_width: 4, line_color: 0x334155, line_rounded: true }
+        - obj: { x: 233, y: 243, width: 14, height: 14, radius: 7, border_width: 0, bg_color: 0x475569 }
+
+        # Knoten
+        - obj:
+            x: 198
+            y: 66
+            width: 84
+            height: 84
+            radius: 42
+            bg_color: 0x1E293B
+            border_width: 3
+            border_color: 0xFACC15
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0A72", text_font: font_icon, text_color: 0xFACC15 }
+        - obj:
+            x: 46
+            y: 208
+            width: 84
+            height: 84
+            radius: 42
+            bg_color: 0x1E293B
+            border_width: 3
+            border_color: 0x94A3B8
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0D3E", text_font: font_icon, text_color: 0x94A3B8 }
+        - obj:
+            x: 350
+            y: 208
+            width: 84
+            height: 84
+            radius: 42
+            bg_color: 0x1E293B
+            border_width: 3
+            border_color: 0x4ADE80
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0079", text_font: font_icon, text_color: 0x4ADE80 }
+        - obj:
+            x: 198
+            y: 350
+            width: 84
+            height: 84
+            radius: 42
+            bg_color: 0x1E293B
+            border_width: 3
+            border_color: 0x60A5FA
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon, text_color: 0x60A5FA }
+
+        # Werte neben den Knoten
+        - label: { x: 296, y: 80, text: "PV", text_color: 0x94A3B8 }
+        - label: { id: lbl_f_pv, x: 296, y: 102, text: "--", text_font: font_m, text_color: 0xFACC15 }
+        - label: { id: lbl_f_grid, x: 28, y: 300, width: 120, text_align: CENTER, text: "--", text_font: font_m }
+        - label: { id: lbl_f_grid_sub, x: 28, y: 328, width: 120, text_align: CENTER, text: "", text_color: 0x94A3B8 }
+        - label: { id: lbl_f_soc, x: 332, y: 300, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0x4ADE80 }
+        - label: { id: lbl_f_akku, x: 322, y: 328, width: 140, text_align: CENTER, text: "", text_color: 0x94A3B8 }
+        - label: { x: 296, y: 364, text: "Haus", text_color: 0x94A3B8 }
+        - label: { id: lbl_f_load, x: 296, y: 386, text: "--", text_font: font_m, text_color: 0x60A5FA }
+
+        # Bewegte Punkte (Position setzt das 40-ms-Intervall)
+        - obj: { id: dot_pv,   hidden: true, width: 14, height: 14, radius: 7, border_width: 0, bg_color: 0xFACC15 }
+        - obj: { id: dot_grid, hidden: true, width: 14, height: 14, radius: 7, border_width: 0, bg_color: 0xF1F5F9 }
+        - obj: { id: dot_akku, hidden: true, width: 14, height: 14, radius: 7, border_width: 0, bg_color: 0x4ADE80 }
+        - obj: { id: dot_haus, hidden: true, width: 14, height: 14, radius: 7, border_width: 0, bg_color: 0x60A5FA }
+
+    # ======================= Einstellungen =======================
+    - id: page_settings
+      bg_color: 0x0B1120
+      widgets:
+        - button:
+            align: TOP_LEFT
+            x: 12
+            y: 8
+            width: 48
+            height: 48
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_main
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF053"
+                  text_font: montserrat_24
+                  text_color: 0xE2E8F0
+        - label:
+            align: TOP_MID
+            y: 20
+            text: "Einstellungen"
+            text_font: font_m
+            text_color: 0xF1F5F9
+
+        # Wechselrichter
+        - obj:
+            styles: st_card
+            align: TOP_MID
+            y: 72
+            width: 444
+            height: 150
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter", text_color: 0x94A3B8 }
+              - label: { id: lbl_ip, align: TOP_LEFT, y: 28, text: "nicht gesetzt", text_font: font_m, text_color: 0xF1F5F9 }
+              - button:
+                  align: TOP_RIGHT
+                  width: 130
+                  height: 44
+                  styles: st_btn
+                  bg_color: 0x2563EB
+                  on_click:
+                    - lambda: fronius_scan::start();
+                  widgets:
+                    - label: { align: CENTER, text: "Suchen", text_color: 0xFFFFFF }
+              - bar:
+                  id: bar_scan
+                  align: BOTTOM_MID
+                  y: -28
+                  width: 100%
+                  height: 8
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  bg_color: 0x334155
+                  indicator:
+                    bg_color: 0x2563EB
+              - label: { id: lbl_scan, align: BOTTOM_LEFT, text: "", text_color: 0x94A3B8 }
+
+        # Helligkeit
+        - obj:
+            styles: st_card
+            align: TOP_MID
+            y: 234
+            width: 444
+            height: 90
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Helligkeit", text_color: 0x94A3B8 }
+              - slider:
+                  id: sld_brightness
+                  align: BOTTOM_MID
+                  y: -8
+                  width: 390
+                  min_value: 10
+                  max_value: 100
+                  value: 80
+                  on_release:
+                    - number.set:
+                        id: brightness
+                        value: !lambda return x;
+
+        # Updates & Info
+        - obj:
+            styles: st_card
+            align: TOP_MID
+            y: 336
+            width: 444
+            height: 126
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Automatische Updates", text_color: 0x94A3B8 }
+              - switch:
+                  id: sw_auto_update
+                  align: TOP_RIGHT
+                  on_change:
+                    - if:
+                        condition:
+                          lambda: return x;
+                        then:
+                          - switch.turn_on: auto_update
+                        else:
+                          - switch.turn_off: auto_update
+              - label: { align: LEFT_MID, y: 2, text: "Version ${fw_version}", text_color: 0xF1F5F9 }
+              - label: { id: lbl_web, align: BOTTOM_LEFT, text: "Web: --", text_color: 0x64748B }
+              - button:
+                  align: BOTTOM_RIGHT
+                  width: 180
+                  height: 40
+                  styles: st_btn
+                  on_click:
+                    - if:
+                        condition:
+                          update.is_available: fw_update
+                        then:
+                          - lvgl.label.update: { id: lbl_update_btn, text: "Installiere …" }
+                          - update.perform: fw_update
+                        else:
+                          - lvgl.label.update: { id: lbl_update_btn, text: "Prüfe …" }
+                          - component.update: fw_update
+                          - delay: 5s
+                          - lvgl.label.update:
+                              id: lbl_update_btn
+                              text: !lambda |-
+                                return id(fw_update).state == update::UPDATE_STATE_AVAILABLE
+                                  ? std::string("Update ") + id(fw_update).update_info.latest_version
+                                  : std::string("Aktuell");
+                  widgets:
+                    - label: { id: lbl_update_btn, align: CENTER, text: "Nach Updates suchen", text_color: 0xF1F5F9 }
