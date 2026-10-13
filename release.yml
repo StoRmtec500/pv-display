@@ -1,0 +1,135 @@
+# ===========================================================================
+#  Firmware-Release für das PV-Display
+#
+#  Auslöser: Git-Tag  vX.Y.Z  (z. B.  git tag -a v1.1.0 -m "Energiefluss-Seite")
+#  Ergebnis:
+#    - GitHub Release mit .ota.bin und .factory.bin
+#    - https://update.mksoft.at/pv-display/manifest.json  (GitHub Pages)
+#      → alle Displays finden das Update beim nächsten Check
+# ===========================================================================
+
+name: Firmware Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version ohne v, z. B. 1.1.0"
+        required: true
+
+permissions:
+  contents: write     # GitHub Release anlegen
+  pages: write        # Update-Server veröffentlichen
+  id-token: write
+
+concurrency:
+  group: firmware-release
+  cancel-in-progress: false
+
+env:
+  CONFIG: pv-display.yaml
+  DEVICE: pv-display
+  DISPLAY_NAME: PV Display
+  BASE_URL: https://update.mksoft.at/pv-display
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version bestimmen
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          # Tag-Nachricht als Update-Hinweis am Display / in der Weboberfläche
+          S=$(git tag -l --format='%(contents:subject)' "v$V" 2>/dev/null || true)
+          echo "summary=${S:-Version $V}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build-Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .esphome/build
+          key: esphome-${{ hashFiles('pv-display.yaml', 'fronius_scan.h') }}
+          restore-keys: esphome-
+
+      # ESPHOME_VERSION als Repository-Variable setzen, um die Version festzunageln
+      - name: ESPHome installieren
+        env:
+          ESPHOME_VERSION: ${{ vars.ESPHOME_VERSION }}
+        run: pip install "esphome${ESPHOME_VERSION:+==$ESPHOME_VERSION}"
+
+      - name: Firmware kompilieren
+        run: esphome -s fw_version "${{ steps.version.outputs.version }}" compile "$CONFIG"
+
+      - name: Dateien einsammeln
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          OTA=$(find .esphome/build -name firmware.ota.bin | head -n1)
+          FACTORY=$(find .esphome/build -name firmware.factory.bin | head -n1)
+          test -s "$OTA" && test -s "$FACTORY" || { echo "Firmware-Dateien nicht gefunden"; exit 1; }
+          mkdir -p "site/$DEVICE"
+          cp "$OTA"     "site/$DEVICE/$DEVICE-$V.ota.bin"
+          cp "$FACTORY" "site/$DEVICE/$DEVICE-$V.factory.bin"
+
+      - name: Manifest erzeugen
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          V="${{ steps.version.outputs.version }}"
+          npm run manifest -- \
+            --dir "site/$DEVICE" \
+            --base-url "$BASE_URL" \
+            --name "$DISPLAY_NAME" \
+            --version "$V" \
+            --ota "$DEVICE-$V.ota.bin" \
+            --factory "$DEVICE-$V.factory.bin" \
+            --summary "${{ steps.version.outputs.summary }}" \
+            --release-url "${{ github.server_url }}/${{ github.repository }}/releases/tag/v$V"
+
+      - name: GitHub Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          gh release create "v$V" \
+            "site/$DEVICE/$DEVICE-$V.ota.bin" \
+            "site/$DEVICE/$DEVICE-$V.factory.bin" \
+            "site/$DEVICE/manifest.json" \
+            --title "PV Display $V" --generate-notes \
+            || gh release upload "v$V" site/$DEVICE/* --clobber
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
