@@ -330,16 +330,16 @@ sensor:
     device_class: battery
     update_interval: never
     on_value:
+      # Texte mit Prozentzeichen als Lambda: ESPHomes format-Prüfung
+      # verwechselt "%%" mit einem Platzhalter
       - lvgl.label.update:
           id: lbl_soc
-          text:
-            format: "%.0f%%"
-            args: [ x ]
+          text: !lambda |-
+            return str_sprintf("%.0f%%", x);
       - lvgl.label.update:
           id: lbl_f_soc
-          text:
-            format: "%.0f %%"
-            args: [ x ]
+          text: !lambda |-
+            return str_sprintf("%.0f %%", x);
 
   - platform: template
     id: autarkie
@@ -349,9 +349,8 @@ sensor:
     on_value:
       - lvgl.label.update:
           id: lbl_autarkie
-          text:
-            format: "%.0f %% autark"
-            args: [ x ]
+          text: !lambda |-
+            return str_sprintf("%.0f %% autark", x);
 
   - platform: template
     id: e_day
