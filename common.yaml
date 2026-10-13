@@ -1,0 +1,463 @@
+# ===========================================================================
+#  mksoft PV-Display – gemeinsame Logik für alle Boards
+#  Fronius-Abfrage, Netzwerksuche, Einstellungen, Zeit, Auto-Update
+#
+#  Wird von den Board-Dateien (board-*.yaml) per "packages:" eingebunden.
+#  Jede Board-Oberfläche muss dieselben Widget-IDs bereitstellen
+#  (lbl_pv, arc_pv, lbl_grid, dot_pv, bar_scan, ...), weil diese Datei sie befüllt.
+#
+#  Pflicht-Substitutions der Board-Datei:
+#    name, friendly_name, project_name, update_manifest,
+#    flow_cx, flow_cy, flow_top, flow_bottom, flow_left, flow_right, flow_dot_half
+# ===========================================================================
+
+substitutions:
+  fw_version: "0.0.0-dev"           # wird beim Release vom Git-Tag überschrieben
+  setup_ssid: PV-Display-Setup
+  setup_password: mksoft-setup      # steht in der Kundenanleitung
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true         # eindeutiger Hostname je Gerät
+  min_version: 2025.7.0
+  project:
+    name: ${project_name}
+    version: ${fw_version}
+  includes:
+    - fronius_scan.h
+  on_boot:
+    - priority: -100
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: !lambda return id(brightness).state / 100.0f;
+        - lvgl.slider.update:
+            id: sld_brightness
+            value: !lambda return id(brightness).state;
+        - lvgl.widget.update:
+            id: sw_auto_update
+            state:
+              checked: !lambda return id(auto_update).state;
+        - lvgl.label.update:
+            id: lbl_ip
+            text: !lambda |-
+              return id(fronius_ip).state.empty() ? std::string("nicht gesetzt") : id(fronius_ip).state;
+
+logger:
+  level: INFO
+
+# ---------------------------------------------------------------------------
+#  Netzwerk, Einrichtung, Updates
+# ---------------------------------------------------------------------------
+
+wifi:
+  # Keine fest eingetragenen Netze: der Kunde richtet WLAN über den Hotspot ein
+  ap:
+    ssid: ${setup_ssid}
+    password: ${setup_password}
+  on_connect:
+    - lvgl.widget.hide: hint_box
+    - lambda: |-
+        if (id(fronius_ip).state.empty()) fronius_scan::start();
+  on_disconnect:
+    - lvgl.widget.show: hint_box
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  local: true                       # Weboberfläche funktioniert ohne Internet
+
+safe_mode:
+
+# Release-Firmware: Updates nur vom eigenen Update-Server.
+# Netzwerk-OTA aus ESPHome gibt es nur im Entwicklungs-Build (pv-display-dev.yaml),
+# weil die Release-Firmware öffentlich herunterladbar ist und ein darin
+# enthaltenes OTA-Passwort ausgelesen werden könnte.
+ota:
+  - platform: http_request
+
+http_request:
+  useragent: pv-display/${fw_version}
+  timeout: 3s
+  verify_ssl: true
+
+update:
+  - platform: http_request
+    id: fw_update
+    name: Firmware
+    source: ${update_manifest}
+    update_interval: 6h
+    on_update_available:
+      - lvgl.label.update:
+          id: lbl_update_btn
+          text: !lambda return std::string("Update ") + id(fw_update).update_info.latest_version;
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Vienna
+    servers:
+      - 0.at.pool.ntp.org
+      - 1.at.pool.ntp.org
+      - pool.ntp.org
+    on_time_sync:
+      - lvgl.label.update:
+          id: lbl_time
+          text: !lambda return id(sntp_time).now().strftime("%H:%M");
+    on_time:
+      - seconds: 0
+        then:
+          - lvgl.label.update:
+              id: lbl_time
+              text: !lambda return id(sntp_time).now().strftime("%H:%M");
+      # Nächtliches Auto-Update um 03:17
+      - seconds: 0
+        minutes: 17
+        hours: 3
+        then:
+          - if:
+              condition:
+                switch.is_on: auto_update
+              then:
+                - component.update: fw_update
+                - delay: 30s
+                - if:
+                    condition:
+                      update.is_available: fw_update
+                    then:
+                      - update.perform: fw_update
+
+globals:
+  - id: fail_count
+    type: int
+    initial_value: "0"
+  - id: flow_active               # Animation nur rechnen, wenn Seite sichtbar
+    type: bool
+    initial_value: "false"
+
+# ---------------------------------------------------------------------------
+#  Einstellungen (dauerhaft gespeichert, auch über Weboberfläche änderbar)
+# ---------------------------------------------------------------------------
+
+text:
+  - platform: template
+    id: fronius_ip
+    name: Fronius IP
+    icon: mdi:solar-power
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    max_length: 32
+    on_value:
+      - lvgl.label.update:
+          id: lbl_ip
+          text: !lambda |-
+            return x.empty() ? std::string("nicht gesetzt") : x;
+
+number:
+  - platform: template
+    id: brightness
+    name: Helligkeit
+    icon: mdi:brightness-6
+    min_value: 10
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    optimistic: true
+    restore_value: true
+    initial_value: 80
+    on_value:
+      - light.turn_on:
+          id: backlight
+          brightness: !lambda return x / 100.0f;
+
+  # Spitzenleistung der Anlage – Basis für den Ring auf der Hauptseite
+  - platform: template
+    id: pv_peak
+    name: Anlagenleistung
+    icon: mdi:solar-panel-large
+    mode: box
+    min_value: 1
+    max_value: 100
+    step: 0.1
+    unit_of_measurement: kWp
+    optimistic: true
+    restore_value: true
+    initial_value: 10
+
+switch:
+  - platform: template
+    id: auto_update
+    name: Automatische Updates
+    icon: mdi:update
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+button:
+  - platform: template
+    name: Wechselrichter suchen
+    icon: mdi:magnify
+    on_press:
+      - lambda: fronius_scan::start();
+  - platform: restart
+    name: Neustart
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: own_ip
+      on_value:
+        - lvgl.label.update:
+            id: lbl_web
+            text:
+              format: "Web: http://%s"
+              args: [ x.c_str() ]
+
+# ---------------------------------------------------------------------------
+#  Fronius-Daten
+# ---------------------------------------------------------------------------
+
+binary_sensor:
+  - platform: template
+    id: fronius_online
+    name: Fronius erreichbar
+    device_class: connectivity
+    on_state:
+      - lambda: |-
+          lv_obj_set_style_bg_color(id(dot_status),
+            x ? lv_color_hex(0x22C55E) : lv_color_hex(0xEF4444), 0);
+
+sensor:
+  - platform: template
+    id: p_pv
+    name: PV Leistung
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_pv
+          text:
+            format: "%.2f"
+            args: [ x / 1000.0f ]
+      - lvgl.arc.update:
+          id: arc_pv
+          value: !lambda return (int) std::min(100.0f, std::max(0.0f, x / (id(pv_peak).state * 10.0f)));
+      - lvgl.label.update:
+          id: lbl_f_pv
+          text:
+            format: "%.2f kW"
+            args: [ x / 1000.0f ]
+
+  - platform: template
+    id: p_grid
+    name: Netz
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_grid
+          text:
+            format: "%.2f"
+            args: [ fabsf(x) / 1000.0f ]
+      - lvgl.label.update:
+          id: lbl_f_grid
+          text:
+            format: "%.2f kW"
+            args: [ fabsf(x) / 1000.0f ]
+      - lambda: |-
+          const char *sub = fabsf(x) < 20 ? "ausgeglichen" : (x > 0 ? "Bezug" : "Einspeisung");
+          lv_label_set_text(id(lbl_grid_sub), sub);
+          lv_label_set_text(id(lbl_f_grid_sub), sub);
+          lv_color_t c = fabsf(x) < 20 ? lv_color_hex(0xF1F5F9)
+                       : (x > 0 ? lv_color_hex(0xF87171) : lv_color_hex(0x4ADE80));
+          lv_obj_set_style_text_color(id(lbl_grid), c, 0);
+          lv_obj_set_style_text_color(id(lbl_f_grid), c, 0);
+          lv_obj_set_style_bg_color(id(dot_grid), c, 0);
+
+  - platform: template
+    id: p_load
+    name: Verbrauch
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_load
+          text:
+            format: "%.2f"
+            args: [ x / 1000.0f ]
+      - lvgl.label.update:
+          id: lbl_f_load
+          text:
+            format: "%.2f kW"
+            args: [ x / 1000.0f ]
+
+  - platform: template
+    id: p_akku
+    name: Akku Leistung
+    unit_of_measurement: W
+    device_class: power
+    update_interval: never
+    on_value:
+      - lambda: |-
+          char buf[32];
+          if (fabsf(x) < 20) snprintf(buf, sizeof(buf), "Standby");
+          else snprintf(buf, sizeof(buf), "%s %.2f kW", x < 0 ? "lädt" : "entlädt", fabsf(x) / 1000.0f);
+          lv_label_set_text(id(lbl_akku_sub), buf);
+          lv_label_set_text(id(lbl_f_akku), buf);
+
+  - platform: template
+    id: soc
+    name: Akku Ladestand
+    unit_of_measurement: "%"
+    device_class: battery
+    update_interval: never
+    on_value:
+      # Texte mit Prozentzeichen als Lambda: ESPHomes format-Prüfung
+      # verwechselt "%%" mit einem Platzhalter
+      - lvgl.label.update:
+          id: lbl_soc
+          text: !lambda |-
+            return str_sprintf("%.0f%%", x);
+      - lvgl.label.update:
+          id: lbl_f_soc
+          text: !lambda |-
+            return str_sprintf("%.0f %%", x);
+
+  - platform: template
+    id: autarkie
+    name: Autarkie
+    unit_of_measurement: "%"
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_autarkie
+          text: !lambda |-
+            return str_sprintf("%.0f %% autark", x);
+
+  - platform: template
+    id: e_day
+    name: Ertrag heute
+    unit_of_measurement: kWh
+    device_class: energy
+    update_interval: never
+    on_value:
+      - lvgl.label.update:
+          id: lbl_eday
+          text:
+            format: "Heute %.1f kWh"
+            args: [ x ]
+
+interval:
+  # Fronius alle 5 s abfragen
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            and:
+              - wifi.connected:
+              - lambda: return !id(fronius_ip).state.empty() && !fronius_scan::is_running();
+          then:
+            - http_request.get:
+                url: !lambda return "http://" + id(fronius_ip).state + "/solar_api/v1/GetPowerFlowRealtimeData.fcgi";
+                capture_response: true
+                max_response_buffer_size: 4kB
+                on_response:
+                  then:
+                    - lambda: |-
+                        bool ok = false;
+                        if (response->status_code == 200) {
+                          ok = json::parse_json(body, [](JsonObject root) -> bool {
+                            JsonObject site = root["Body"]["Data"]["Site"];
+                            if (site.isNull()) return false;
+                            id(p_pv).publish_state(site["P_PV"] | 0.0f);
+                            id(p_grid).publish_state(site["P_Grid"] | 0.0f);
+                            id(p_load).publish_state(fabsf(site["P_Load"] | 0.0f));
+                            if (!site["P_Akku"].isNull())       id(p_akku).publish_state(site["P_Akku"].as<float>());
+                            if (!site["rel_Autonomy"].isNull()) id(autarkie).publish_state(site["rel_Autonomy"].as<float>());
+                            if (!site["E_Day"].isNull())        id(e_day).publish_state(site["E_Day"].as<float>() / 1000.0f);
+                            JsonObject inverters = root["Body"]["Data"]["Inverters"];
+                            for (JsonPair kv : inverters) {
+                              JsonVariant s = kv.value()["SOC"];
+                              if (!s.isNull()) { id(soc).publish_state(s.as<float>()); break; }
+                            }
+                            return true;
+                          });
+                        }
+                        id(fronius_online).publish_state(ok);
+                        if (ok) {
+                          id(fail_count) = 0;
+                        } else if (++id(fail_count) >= 24) {   // ~2 min keine Daten
+                          id(fail_count) = 0;
+                          fronius_scan::start();               // IP evtl. per DHCP geändert
+                        }
+                on_error:
+                  then:
+                    - binary_sensor.template.publish:
+                        id: fronius_online
+                        state: false
+                    - lambda: |-
+                        if (++id(fail_count) >= 24) {
+                          id(fail_count) = 0;
+                          fronius_scan::start();
+                        }
+
+  # Animation der Energiefluss-Seite (~25 fps, nur wenn sichtbar)
+  - interval: 40ms
+    then:
+      - lambda: |-
+          if (!id(flow_active)) return;
+          static float phase[4] = {0.0f, 0.25f, 0.5f, 0.75f};
+
+          // Mehr Leistung = schnellere Punkte
+          auto move = [&](lv_obj_t *dot, int i, float x0, float y0, float x1, float y1,
+                          float power, bool towards_end) {
+            if (std::isnan(power) || fabsf(power) < 20) {
+              lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+              return;
+            }
+            lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+            phase[i] += 0.012f + std::min(fabsf(power) / 6000.0f, 1.0f) * 0.035f;
+            if (phase[i] >= 1.0f) phase[i] -= 1.0f;
+            const float t = towards_end ? phase[i] : 1.0f - phase[i];
+            lv_obj_set_pos(dot, (lv_coord_t) (x0 + (x1 - x0) * t - ${flow_dot_half}),
+                                (lv_coord_t) (y0 + (y1 - y0) * t - ${flow_dot_half}));
+          };
+
+          // Alle Segmente laufen Knoten -> Mitte, Haus: Mitte -> Knoten (Koordinaten je Board)
+          const float g = id(p_grid).state;   // > 0 Bezug, < 0 Einspeisung
+          const float a = id(p_akku).state;   // > 0 entlädt, < 0 lädt
+          move(id(dot_pv),   0, ${flow_cx}, ${flow_top}, ${flow_cx}, ${flow_cy}, id(p_pv).state, true);
+          move(id(dot_grid), 1, ${flow_left}, ${flow_cy}, ${flow_cx}, ${flow_cy}, g, g > 0);
+          move(id(dot_akku), 2, ${flow_right}, ${flow_cy}, ${flow_cx}, ${flow_cy}, a, a > 0);
+          move(id(dot_haus), 3, ${flow_cx}, ${flow_cy}, ${flow_cx}, ${flow_bottom}, id(p_load).state, true);
+
+  # Fortschritt der Wechselrichter-Suche ins Display übernehmen
+  - interval: 300ms
+    then:
+      - lambda: |-
+          using fronius_scan::State;
+          static State last = State::IDLE;
+          const State st = fronius_scan::state();
+
+          if (st == State::RUNNING) {
+            lv_bar_set_value(id(bar_scan), fronius_scan::progress(), LV_ANIM_ON);
+            lv_label_set_text_fmt(id(lbl_scan), "Suche läuft … %d %%", fronius_scan::progress());
+          } else if (st == State::FOUND) {
+            const std::string ip = fronius_scan::take_result();
+            auto call = id(fronius_ip).make_call();
+            call.set_value(ip);
+            call.perform();
+            lv_bar_set_value(id(bar_scan), 100, LV_ANIM_ON);
+            lv_label_set_text_fmt(id(lbl_scan), "Gefunden: %s", ip.c_str());
+          } else if (st == State::NOT_FOUND && last != st) {
+            lv_label_set_text(id(lbl_scan), "Kein Wechselrichter gefunden");
+          }
+          last = st;
+

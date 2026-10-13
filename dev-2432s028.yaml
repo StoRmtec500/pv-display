@@ -1,0 +1,25 @@
+# ===========================================================================
+#  Entwicklungs-Build ESP32-2432S028 (Schreibtisch, nie verteilen)
+#  = Release-Konfiguration + Netzwerk-OTA + ausführliches Log
+#  Flashen:  esphome run dev-2432s028.yaml
+#
+#  Touch kalibrieren: Ecken antippen, im Log die raw-Werte ablesen und
+#  die Minimal-/Maximalwerte in board-2432s028.yaml unter calibration eintragen.
+# ===========================================================================
+
+packages:
+  board: !include board-2432s028.yaml
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  level: DEBUG
+
+touchscreen:
+  - id: !extend touch
+    on_touch:
+      - lambda: |-
+          for (auto t : touches)
+            ESP_LOGI("touch", "x=%d y=%d  raw_x=%d raw_y=%d", t.x, t.y, t.x_raw, t.y_raw);

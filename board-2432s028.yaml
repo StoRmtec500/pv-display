@@ -1,0 +1,540 @@
+# ===========================================================================
+#  PV-Display für ESP32-2432S028 ("Cheap Yellow Display")
+#  ESP32 (ohne PSRAM), 2,8" 320×240 quer, resistiver Touch (XPT2046), 4 MB Flash
+#  Bauen:  esphome compile board-2432s028.yaml
+# ===========================================================================
+
+substitutions:
+  name: pv-display-cyd
+  friendly_name: PV Display
+  project_name: mksoft.pv-display-cyd
+  update_manifest: https://update.mksoft.at/pv-display-cyd/manifest.json
+
+  # Display-Variante – steht auf der Rückseite bzw. erkennbar an den USB-Buchsen:
+  #   ESP32-2432S028        nur Micro-USB             (ILI9341)
+  #   ESP32-2432S028-7789   Micro-USB + USB-C         (ST7789)
+  #   ESP32-2432S028-9342   Micro-USB + USB-C, andere Charge (ILI9342)
+  cyd_model: ESP32-2432S028
+  # 90 = USB-Buchse rechts, 270 = USB-Buchse links
+  cyd_rotation: "90"
+
+  # Energiefluss-Seite: Mittelpunkt und Kanten der Knoten (Pixel)
+  flow_cx: "160"
+  flow_cy: "138"
+  flow_top: "84"
+  flow_bottom: "192"
+  flow_left: "82"
+  flow_right: "238"
+  flow_dot_half: "5"
+
+packages:
+  common: !include common.yaml
+
+esp32:
+  board: esp32dev
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_LWIP_MAX_SOCKETS: "16"    # Reserve für parallelen Netzwerk-Scan
+
+# ---------------------------------------------------------------------------
+#  Hardware: Display, Touch, Hintergrundbeleuchtung, RGB-LED
+# ---------------------------------------------------------------------------
+
+spi:
+  - id: display_spi
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch_spi
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+display:
+  - platform: mipi_spi
+    model: ${cyd_model}
+    id: main_display
+    spi_id: display_spi
+    auto_clear_enabled: false
+    update_interval: never
+
+touchscreen:
+  - platform: xpt2046
+    id: touch
+    spi_id: touch_spi
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    threshold: 400
+    # Typische Werte – exakte Werte je Gerät mit dem Dev-Build ermitteln
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_out
+  # RGB-LED auf der Rückseite (low-aktiv) – wird beim Start ausgeschaltet
+  - platform: gpio
+    pin: GPIO4
+    id: led_red
+    inverted: true
+  - platform: gpio
+    pin: GPIO16
+    id: led_green
+    inverted: true
+  - platform: gpio
+    pin: GPIO17
+    id: led_blue
+    inverted: true
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Display Beleuchtung
+    output: backlight_out
+    restore_mode: ALWAYS_ON
+    default_transition_length: 250ms
+
+# ---------------------------------------------------------------------------
+#  Schriften – klein gehalten wegen 4 MB Flash
+# ---------------------------------------------------------------------------
+
+font:
+  - file: { type: gfonts, family: Inter, weight: 500 }
+    id: font_s
+    size: 12
+    bpp: 4
+    glyphsets: [GF_Latin_Core]
+  - file: { type: gfonts, family: Inter, weight: 600 }
+    id: font_m
+    size: 17
+    bpp: 4
+    glyphsets: [GF_Latin_Core]
+  - file: { type: gfonts, family: Inter, weight: 700 }
+    id: font_l
+    size: 22
+    bpp: 4
+    glyphs: "0123456789.,-% "
+  - file: { type: gfonts, family: Inter, weight: 700 }
+    id: font_xl
+    size: 40
+    bpp: 4
+    glyphs: "0123456789.,-"
+  - file:
+      type: web
+      url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
+    id: font_icon
+    size: 26
+    bpp: 4
+    glyphs:
+      - "\U000F0A72"   # solar-power
+      - "\U000F0D3E"   # transmission-tower
+      - "\U000F0079"   # battery
+      - "\U000F02DC"   # home
+  - file:
+      type: web
+      url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
+    id: font_icon_s
+    size: 18
+    bpp: 4
+    glyphs:
+      - "\U000F0A72"   # solar-power
+
+# ---------------------------------------------------------------------------
+#  Oberfläche (320 × 240 quer)
+#  Gleiche Widget-IDs wie board-4848s040.yaml – common.yaml befüllt sie.
+# ---------------------------------------------------------------------------
+
+lvgl:
+  displays: [main_display]
+  touchscreens: [touch]
+  rotation: ${cyd_rotation}         # Drehung macht LVGL, nicht der Display-Treiber
+  buffer_size: 25%                  # kein PSRAM: Teil-Puffer statt Vollbild
+  default_font: font_s
+
+  style_definitions:
+    - id: st_card
+      bg_color: 0x1E293B
+      bg_opa: COVER
+      radius: 12
+      border_width: 0
+      pad_all: 8
+    - id: st_btn
+      bg_color: 0x334155
+      radius: 8
+      border_width: 0
+      shadow_width: 0
+    - id: st_node
+      bg_color: 0x1E293B
+      radius: 22
+      border_width: 2
+      pad_all: 0
+
+  pages:
+    # ======================= Hauptseite =======================
+    - id: page_main
+      bg_color: 0x0B1120
+      widgets:
+        - label:
+            id: lbl_time
+            x: 10
+            y: 9
+            text: "--:--"
+            text_font: font_m
+            text_color: 0xE2E8F0
+        - label:
+            id: lbl_eday
+            x: 64
+            y: 12
+            text: ""
+            text_color: 0x94A3B8
+        - obj:
+            id: dot_status
+            align: TOP_RIGHT
+            x: -84
+            y: 14
+            width: 8
+            height: 8
+            radius: 4
+            border_width: 0
+            bg_color: 0xEF4444
+        - button:
+            align: TOP_RIGHT
+            x: -44
+            y: 4
+            width: 32
+            height: 30
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_flow
+            widgets:
+              - label: { align: CENTER, text: "\U000F0A72", text_font: font_icon_s, text_color: 0xFACC15 }
+        - button:
+            align: TOP_RIGHT
+            x: -6
+            y: 4
+            width: 32
+            height: 30
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_settings
+            widgets:
+              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+
+        # Links: Ring = PV-Leistung im Verhältnis zur Anlagenleistung
+        - arc:
+            id: arc_pv
+            x: 6
+            y: 42
+            width: 156
+            height: 156
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            arc_color: 0x1E293B
+            arc_width: 10
+            indicator:
+              arc_color: 0xFACC15
+              arc_width: 10
+            knob:
+              bg_opa: TRANSP
+        - label:
+            align_to: { id: arc_pv, align: CENTER, y: -32 }
+            text: "PV-Leistung"
+            text_color: 0x94A3B8
+        - label:
+            id: lbl_pv
+            align_to: { id: arc_pv, align: CENTER, y: 0 }
+            text: "--"
+            text_font: font_xl
+            text_color: 0xFACC15
+        - label:
+            align_to: { id: arc_pv, align: CENTER, y: 30 }
+            text: "kW"
+            text_font: font_m
+            text_color: 0x94A3B8
+        - label:
+            id: lbl_autarkie
+            x: 6
+            y: 206
+            width: 156
+            text_align: CENTER
+            text: ""
+            text_color: 0x4ADE80
+
+        # Rechts: drei Zeilen Haus / Netz / Akku
+        - obj:
+            styles: st_card
+            x: 168
+            y: 42
+            width: 146
+            height: 60
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Haus", text_color: 0x94A3B8 }
+              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { align: BOTTOM_LEFT, text: "Verbrauch", text_color: 0x64748B }
+              - label: { id: lbl_load, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+        - obj:
+            styles: st_card
+            x: 168
+            y: 108
+            width: 146
+            height: 60
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Netz", text_color: 0x94A3B8 }
+              - label: { align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
+              - label: { id: lbl_grid_sub, align: BOTTOM_LEFT, text: "", text_color: 0x64748B }
+              - label: { id: lbl_grid, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+        - obj:
+            styles: st_card
+            x: 168
+            y: 174
+            width: 146
+            height: 60
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Akku", text_color: 0x94A3B8 }
+              - label: { id: lbl_akku_sub, align: TOP_RIGHT, text: "kein Akku", text_color: 0x64748B }
+              - label: { id: lbl_soc, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+
+        # Hinweis bei fehlendem WLAN (überdeckt die rechte Spalte)
+        - obj:
+            id: hint_box
+            styles: st_card
+            bg_color: 0x1E3A8A
+            x: 168
+            y: 42
+            width: 146
+            height: 192
+            scrollable: false
+            widgets:
+              - label:
+                  width: 100%
+                  long_mode: WRAP
+                  align: CENTER
+                  text_align: CENTER
+                  text_color: 0xF1F5F9
+                  text: "WLAN einrichten: Mit dem Handy das WLAN „${setup_ssid}“ verbinden (Passwort: ${setup_password}) und den Anweisungen folgen."
+
+    # ======================= Energiefluss =======================
+    # Knoten (Ø 44): PV oben, Netz links, Akku rechts, Haus unten; Mitte (160/138)
+    - id: page_flow
+      bg_color: 0x0B1120
+      on_load:
+        - lambda: id(flow_active) = true;
+      on_unload:
+        - lambda: id(flow_active) = false;
+      widgets:
+        - button:
+            x: 6
+            y: 4
+            width: 32
+            height: 30
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_main
+            widgets:
+              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+        - label:
+            align: TOP_MID
+            y: 9
+            text: "Energiefluss"
+            text_font: font_m
+            text_color: 0xF1F5F9
+
+        - line: { points: ["160, 84", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["82, 138", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["238, 138", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
+        - line: { points: ["160, 138", "160, 192"], line_width: 3, line_color: 0x334155, line_rounded: true }
+        - obj: { x: 155, y: 133, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x475569 }
+
+        - obj:
+            styles: st_node
+            x: 138
+            y: 40
+            width: 44
+            height: 44
+            border_color: 0xFACC15
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0A72", text_font: font_icon, text_color: 0xFACC15 }
+        - obj:
+            styles: st_node
+            x: 38
+            y: 116
+            width: 44
+            height: 44
+            border_color: 0x94A3B8
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0D3E", text_font: font_icon, text_color: 0x94A3B8 }
+        - obj:
+            styles: st_node
+            x: 238
+            y: 116
+            width: 44
+            height: 44
+            border_color: 0x4ADE80
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F0079", text_font: font_icon, text_color: 0x4ADE80 }
+        - obj:
+            styles: st_node
+            x: 138
+            y: 192
+            width: 44
+            height: 44
+            border_color: 0x60A5FA
+            scrollable: false
+            widgets:
+              - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon, text_color: 0x60A5FA }
+
+        - label: { id: lbl_f_pv, x: 190, y: 52, text: "--", text_font: font_m, text_color: 0xFACC15 }
+        - label: { id: lbl_f_grid, x: 0, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m }
+        - label: { id: lbl_f_grid_sub, x: 0, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x94A3B8 }
+        - label: { id: lbl_f_soc, x: 200, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0x4ADE80 }
+        - label: { id: lbl_f_akku, x: 200, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x94A3B8 }
+        - label: { id: lbl_f_load, x: 190, y: 205, text: "--", text_font: font_m, text_color: 0x60A5FA }
+
+        - obj: { id: dot_pv,   hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xFACC15 }
+        - obj: { id: dot_grid, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xF1F5F9 }
+        - obj: { id: dot_akku, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x4ADE80 }
+        - obj: { id: dot_haus, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x60A5FA }
+
+    # ======================= Einstellungen =======================
+    - id: page_settings
+      bg_color: 0x0B1120
+      widgets:
+        - button:
+            x: 6
+            y: 4
+            width: 32
+            height: 30
+            styles: st_btn
+            on_click:
+              - lvgl.page.show: page_main
+            widgets:
+              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+        - label:
+            align: TOP_MID
+            y: 9
+            text: "Einstellungen"
+            text_font: font_m
+            text_color: 0xF1F5F9
+
+        # Wechselrichter
+        - obj:
+            styles: st_card
+            x: 6
+            y: 40
+            width: 308
+            height: 78
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter", text_color: 0x94A3B8 }
+              - label: { id: lbl_ip, align: TOP_LEFT, y: 16, text: "nicht gesetzt", text_font: font_m, text_color: 0xF1F5F9 }
+              - button:
+                  align: TOP_RIGHT
+                  width: 84
+                  height: 30
+                  styles: st_btn
+                  bg_color: 0x2563EB
+                  on_click:
+                    - lambda: fronius_scan::start();
+                  widgets:
+                    - label: { align: CENTER, text: "Suchen", text_color: 0xFFFFFF }
+              - bar:
+                  id: bar_scan
+                  align: BOTTOM_MID
+                  y: -16
+                  width: 100%
+                  height: 5
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  bg_color: 0x334155
+                  indicator:
+                    bg_color: 0x2563EB
+              - label: { id: lbl_scan, align: BOTTOM_LEFT, text: "", text_color: 0x94A3B8 }
+
+        # Helligkeit
+        - obj:
+            styles: st_card
+            x: 6
+            y: 124
+            width: 308
+            height: 42
+            scrollable: false
+            widgets:
+              - label: { align: LEFT_MID, text: "Helligkeit", text_color: 0x94A3B8 }
+              - slider:
+                  id: sld_brightness
+                  align: RIGHT_MID
+                  x: -8
+                  width: 190
+                  height: 8
+                  min_value: 10
+                  max_value: 100
+                  value: 80
+                  on_release:
+                    - number.set:
+                        id: brightness
+                        value: !lambda return x;
+
+        # Updates & Info
+        - obj:
+            styles: st_card
+            x: 6
+            y: 172
+            width: 308
+            height: 62
+            scrollable: false
+            widgets:
+              - label: { align: TOP_LEFT, text: "Automatische Updates", text_color: 0x94A3B8 }
+              - switch:
+                  id: sw_auto_update
+                  align: TOP_RIGHT
+                  width: 40
+                  height: 20
+                  on_change:
+                    - if:
+                        condition:
+                          lambda: return x;
+                        then:
+                          - switch.turn_on: auto_update
+                        else:
+                          - switch.turn_off: auto_update
+              - label: { align: BOTTOM_LEFT, y: -14, text: "Version ${fw_version}", text_color: 0xF1F5F9 }
+              - label: { id: lbl_web, align: BOTTOM_LEFT, text: "Web: --", text_color: 0x64748B }
+              - button:
+                  align: BOTTOM_RIGHT
+                  width: 100
+                  height: 26
+                  styles: st_btn
+                  on_click:
+                    - if:
+                        condition:
+                          update.is_available: fw_update
+                        then:
+                          - lvgl.label.update: { id: lbl_update_btn, text: "Installiere …" }
+                          - update.perform: fw_update
+                        else:
+                          - lvgl.label.update: { id: lbl_update_btn, text: "Prüfe …" }
+                          - component.update: fw_update
+                          - delay: 5s
+                          - lvgl.label.update:
+                              id: lbl_update_btn
+                              text: !lambda |-
+                                return id(fw_update).state == update::UPDATE_STATE_AVAILABLE
+                                  ? std::string("Update ") + id(fw_update).update_info.latest_version
+                                  : std::string("Aktuell");
+                  widgets:
+                    - label: { id: lbl_update_btn, align: CENTER, text: "Updates prüfen", text_color: 0xF1F5F9 }

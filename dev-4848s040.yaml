@@ -1,0 +1,15 @@
+# ===========================================================================
+#  Entwicklungs-Build ESP32-4848S040 (Schreibtisch, nie verteilen)
+#  = Release-Konfiguration + Netzwerk-OTA + ausführliches Log
+#  Flashen:  esphome run dev-4848s040.yaml
+# ===========================================================================
+
+packages:
+  board: !include board-4848s040.yaml
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  level: DEBUG
