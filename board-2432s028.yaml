@@ -6,7 +6,7 @@
 
 substitutions:
   name: pv-display-cyd
-  friendly_name: PV Display
+  friendly_name: PV Display1
   project_name: mksoft.pv-display-cyd
   update_manifest: https://update.mksoft.at/pv-display-cyd/manifest.json
 

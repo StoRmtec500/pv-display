@@ -1,11 +1,12 @@
 # ===========================================================================
-#  Firmware-Release für das PV-Display
+#  Firmware-Release für alle PV-Display-Boards
 #
-#  Auslöser: Git-Tag  vX.Y.Z  (z. B.  git tag -a v1.1.0 -m "Energiefluss-Seite")
-#  Ergebnis:
-#    - GitHub Release mit .ota.bin und .factory.bin
-#    - https://update.mksoft.at/pv-display/manifest.json  (GitHub Pages)
-#      → alle Displays finden das Update beim nächsten Check
+#  Auslöser: Git-Tag  vX.Y.Z  (z. B.  git tag -a v1.2.0 -m "CYD-Unterstützung")
+#  Ergebnis pro Board:
+#    https://update.mksoft.at/<device>/manifest.json  (+ .ota.bin / .factory.bin)
+#  und ein GitHub Release mit allen Dateien.
+#
+#  Neues Board hinzufügen: board-*.yaml anlegen und unten in der Matrix eintragen.
 # ===========================================================================
 
 name: Firmware Release
@@ -16,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version ohne v, z. B. 1.1.0"
+        description: "Version ohne v, z. B. 1.2.0"
         required: true
 
 permissions:
@@ -29,33 +30,51 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONFIG: pv-display.yaml
-  DEVICE: pv-display
-  DISPLAY_NAME: PV Display
-  BASE_URL: https://update.mksoft.at/pv-display
+  BASE_URL: https://update.mksoft.at
 
 jobs:
-  build:
+  version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.v.outputs.version }}
+      summary: ${{ steps.v.outputs.summary }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Version bestimmen
-        id: version
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ inputs.version }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="${INPUT_VERSION#v}"
           else
             V="${GITHUB_REF_NAME#v}"
+          fi
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Ungültige Version '$V' – erwartet z. B. 1.2.1"
+            exit 1
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           # Tag-Nachricht als Update-Hinweis am Display / in der Weboberfläche
           S=$(git tag -l --format='%(contents:subject)' "v$V" 2>/dev/null || true)
           echo "summary=${S:-Version $V}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: board-4848s040.yaml
+            device: pv-display          # bestehender Pfad – nicht ändern
+            title: PV Display 4"
+          - config: board-2432s028.yaml
+            device: pv-display-cyd
+            title: PV Display 2.8"
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -70,9 +89,10 @@ jobs:
         with:
           path: |
             ~/.platformio
+            ~/.cache/esphome
             .esphome/build
-          key: esphome-${{ hashFiles('pv-display.yaml', 'fronius_scan.h') }}
-          restore-keys: esphome-
+          key: esphome-${{ matrix.device }}-${{ hashFiles(matrix.config, 'common.yaml', 'fronius_scan.h') }}
+          restore-keys: esphome-${{ matrix.device }}-
 
       # ESPHOME_VERSION als Repository-Variable setzen, um die Version festzunageln
       - name: ESPHome installieren
@@ -81,51 +101,88 @@ jobs:
         run: pip install "esphome${ESPHOME_VERSION:+==$ESPHOME_VERSION}"
 
       - name: Firmware kompilieren
-        run: esphome -s fw_version "${{ steps.version.outputs.version }}" compile "$CONFIG"
+        env:
+          CONFIG: ${{ matrix.config }}
+          V: ${{ needs.version.outputs.version }}
+        run: esphome -s fw_version "$V" compile "$CONFIG"
 
       - name: Dateien einsammeln
+        env:
+          CONFIG: ${{ matrix.config }}
+          DEVICE: ${{ matrix.device }}
+          V: ${{ needs.version.outputs.version }}
         run: |
-          V="${{ steps.version.outputs.version }}"
-          OTA=$(find .esphome/build -name firmware.ota.bin | head -n1)
-          FACTORY=$(find .esphome/build -name firmware.factory.bin | head -n1)
-          test -s "$OTA" && test -s "$FACTORY" || { echo "Firmware-Dateien nicht gefunden"; exit 1; }
+          NAME=$(grep -m1 -E '^\s+name: ' "$CONFIG" | awk '{print $2}')
+          OTA=$(find ".esphome/build/$NAME" -name firmware.ota.bin | head -n1)
+          FACTORY=$(find ".esphome/build/$NAME" -name firmware.factory.bin | head -n1)
+          test -s "$OTA" && test -s "$FACTORY" || { echo "Firmware-Dateien für $NAME nicht gefunden"; exit 1; }
           mkdir -p "site/$DEVICE"
           cp "$OTA"     "site/$DEVICE/$DEVICE-$V.ota.bin"
           cp "$FACTORY" "site/$DEVICE/$DEVICE-$V.factory.bin"
+          echo "Größe OTA-Image: $(stat -c %s "$OTA") Bytes"
 
+      # Freitexte (Titel, Tag-Nachricht) nur über env: übergeben, nie direkt
+      # mit ${{ }} in den Befehl – sonst brechen Anführungszeichen das Skript
       - name: Manifest erzeugen
+        env:
+          DEVICE: ${{ matrix.device }}
+          V: ${{ needs.version.outputs.version }}
+          TITLE: ${{ matrix.title }}
+          SUMMARY: ${{ needs.version.outputs.summary }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.version.outputs.version }}
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
-          V="${{ steps.version.outputs.version }}"
           npm run manifest -- \
             --dir "site/$DEVICE" \
-            --base-url "$BASE_URL" \
-            --name "$DISPLAY_NAME" \
+            --base-url "$BASE_URL/$DEVICE" \
+            --name "$TITLE" \
             --version "$V" \
             --ota "$DEVICE-$V.ota.bin" \
             --factory "$DEVICE-$V.factory.bin" \
-            --summary "${{ steps.version.outputs.summary }}" \
-            --release-url "${{ github.server_url }}/${{ github.repository }}/releases/tag/v$V"
+            --summary "$SUMMARY" \
+            --release-url "$RELEASE_URL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.device }}
+          path: site
+          retention-days: 7
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: site
+          merge-multiple: true
 
       - name: GitHub Release anlegen
         env:
           GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.version.outputs.version }}
         run: |
-          V="${{ steps.version.outputs.version }}"
-          gh release create "v$V" \
-            "site/$DEVICE/$DEVICE-$V.ota.bin" \
-            "site/$DEVICE/$DEVICE-$V.factory.bin" \
-            "site/$DEVICE/manifest.json" \
+          find site -name "*.bin" | sort
+          # Manifeste umbenennen, damit sie im Release unterscheidbar sind
+          mkdir -p assets
+          for d in site/*/; do
+            dev=$(basename "$d")
+            cp "$d"/*.bin assets/
+            cp "$d/manifest.json" "assets/$dev-manifest.json"
+          done
+          gh release create "v$V" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "PV Display $V" --generate-notes \
-            || gh release upload "v$V" site/$DEVICE/* --clobber
+            || gh release upload "v$V" assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   publish:
-    needs: build
+    needs: release
     runs-on: ubuntu-latest
     environment:
       name: github-pages
