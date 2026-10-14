@@ -447,7 +447,21 @@ script:
           }
 
           const pv::Totals t = pv::totals(now);
-          if (!t.valid) return;   // letzte Werte stehen lassen, Punkt ist rot
+
+          // Hinweis unter der PV-Leistung, solange kein Wechselrichter Daten liefert
+          // (erst nach 30 s Laufzeit, damit beim Start nichts aufblitzt)
+          static bool offline_shown = false;
+          const bool offline = configured > 0 && !t.valid && now > 30000;
+          if (offline && !offline_shown) {
+            lv_label_set_text(id(lbl_autarkie), "Wechselrichter nicht erreichbar");
+            lv_obj_set_style_text_color(id(lbl_autarkie), lv_color_hex(0xF87171), 0);
+            offline_shown = true;
+          } else if (!offline && offline_shown) {
+            lv_label_set_text(id(lbl_autarkie), "");   // Autarkie-Wert setzt den Text gleich wieder
+            lv_obj_set_style_text_color(id(lbl_autarkie), lv_color_hex(0x4ADE80), 0);
+            offline_shown = false;
+          }
+          if (!t.valid) return;   // letzte Werte stehen lassen
           id(p_pv).publish_state(t.pv);
           if (t.has_grid) id(p_grid).publish_state(t.grid);
           id(p_load).publish_state(t.load);
