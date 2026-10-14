@@ -174,16 +174,18 @@ jobs:
           CHIP: ${{ matrix.chip }}
           SUMMARY: ${{ needs.version.outputs.summary }}
           RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.version.outputs.version }}
+        # Freitexte mit "=" übergeben: Werte, die mit "-" beginnen (Commit-Liste),
+        # würde der Argument-Parser sonst als neue Option deuten
         run: |
           npm run manifest -- \
             --dir "site/$DEVICE" \
             --base-url "$BASE_URL/$DEVICE" \
-            --name "$TITLE" \
+            --name="$TITLE" \
             --version "$V" \
             --chip "$CHIP" \
             --ota "$DEVICE-$V.ota.bin" \
             --factory "$DEVICE-$V.factory.bin" \
-            --summary "$SUMMARY" \
+            --summary="$SUMMARY" \
             --release-url "$RELEASE_URL"
 
       - uses: actions/upload-artifact@v4
