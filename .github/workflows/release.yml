@@ -21,15 +21,14 @@ on:
         required: true
 
 permissions:
-  contents: write     # GitHub Release anlegen
-  pages: write        # Update-Server veröffentlichen
-  id-token: write
+  contents: write     # GitHub Release anlegen + Branch gh-pages schreiben
 
 concurrency:
   group: firmware-release
   cancel-in-progress: false
 
 env:
+  UPDATE_DOMAIN: update.mksoft.at
   BASE_URL: https://update.mksoft.at
 
 jobs:
@@ -186,16 +185,17 @@ jobs:
             --title "PV Display $V" --generate-notes \
             || gh release upload "v$V" assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
-      - uses: actions/upload-pages-artifact@v3
+      # Update-Server = Branch gh-pages. In den Repo-Einstellungen unter Pages:
+      # Source "Deploy from a branch", Branch "gh-pages", Ordner "/ (root)".
+      # Der Branch wird bei jedem Release komplett neu geschrieben (nur aktuelle Firmware).
+      - name: Update-Server veröffentlichen (Branch gh-pages)
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: site
-
-  publish:
-    needs: release
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          cname: ${{ env.UPDATE_DOMAIN }}
+          force_orphan: true
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          commit_message: Firmware ${{ needs.version.outputs.version }}
