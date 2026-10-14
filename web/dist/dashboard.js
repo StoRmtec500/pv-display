@@ -395,7 +395,8 @@ function renderSettings() {
     autoUpdate.firstElementChild.style.transform = au ? 'translateX(20px)' : '';
     setText('scanStatus', str(E.scanStatus));
     const fw = store.get(E.firmware);
-    const available = (fw?.state ?? '').toUpperCase().includes('AVAILABLE');
+    const available = (fw?.state ?? '').toUpperCase().includes('AVAILABLE') &&
+        versionNewer(fw?.latest_version ?? '', fw?.current_version ?? '');
     const installing = (fw?.state ?? '').toUpperCase().includes('INSTALL');
     setText('fwInfo', fw?.current_version
         ? `Version ${fw.current_version}` + (available && fw.latest_version ? ` · ${fw.latest_version} verfügbar` : '')
@@ -473,6 +474,23 @@ function renderUpdateModal(fw, available, installing) {
     renderNotes(ref('updSummary'), installing ? '' : (fw?.summary ?? ''), installing ? '' : latest);
     ref('updProgress').classList.toggle('hidden', !installing);
     ref('updButtons').classList.toggle('hidden', installing);
+}
+function versionNewer(a, b) {
+    const parse = (v) => {
+        const [main, pre = ''] = v.split('-', 2);
+        const nums = main.split('.').map((n) => Number.parseInt(n, 10) || 0);
+        return [[nums[0] ?? 0, nums[1] ?? 0, nums[2] ?? 0], pre];
+    };
+    if (!a)
+        return false;
+    const [na, pa] = parse(a);
+    const [nb, pb] = parse(b);
+    for (let i = 0; i < 3; i++)
+        if (na[i] !== nb[i])
+            return na[i] > nb[i];
+    if ((pa === '') !== (pb === ''))
+        return pa === '';
+    return pa > pb;
 }
 const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 ipInputs.forEach((el) => el.addEventListener('input', () => {

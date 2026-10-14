@@ -485,7 +485,10 @@ function renderSettings(): void {
   setText('scanStatus', str(E.scanStatus));
 
   const fw = store.get(E.firmware);
-  const available = (fw?.state ?? '').toUpperCase().includes('AVAILABLE');
+  // ESPHome meldet "verfügbar", sobald die Nummer nur anders ist – nur neuere Versionen anbieten
+  const available =
+    (fw?.state ?? '').toUpperCase().includes('AVAILABLE') &&
+    versionNewer(fw?.latest_version ?? '', fw?.current_version ?? '');
   const installing = (fw?.state ?? '').toUpperCase().includes('INSTALL');
   setText(
     'fwInfo',
@@ -579,6 +582,21 @@ function renderUpdateModal(fw: EntityState | undefined, available: boolean, inst
   renderNotes(ref('updSummary'), installing ? '' : (fw?.summary ?? ''), installing ? '' : latest);
   ref('updProgress').classList.toggle('hidden', !installing);
   ref('updButtons').classList.toggle('hidden', installing);
+}
+
+/** true, wenn a neuer ist als b ("1.10.0" > "1.9.3", "1.5.0" > "1.5.0-beta.1"). */
+function versionNewer(a: string, b: string): boolean {
+  const parse = (v: string): [number[], string] => {
+    const [main, pre = ''] = v.split('-', 2);
+    const nums = main.split('.').map((n) => Number.parseInt(n, 10) || 0);
+    return [[nums[0] ?? 0, nums[1] ?? 0, nums[2] ?? 0], pre];
+  };
+  if (!a) return false;
+  const [na, pa] = parse(a);
+  const [nb, pb] = parse(b);
+  for (let i = 0; i < 3; i++) if (na[i] !== nb[i]) return na[i] > nb[i];
+  if ((pa === '') !== (pb === '')) return pa === '';
+  return pa > pb;
 }
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;

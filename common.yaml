@@ -116,7 +116,10 @@ update:
     on_update_available:
       - lvgl.label.update:
           id: lbl_update_btn
-          text: !lambda return std::string("Update ") + id(fw_update).update_info.latest_version;
+          text: !lambda |-
+            const auto &i = id(fw_update).update_info;
+            return version_newer(i.latest_version, i.current_version) ? "Update " + i.latest_version
+                                                                      : std::string("Aktuell");
       - script.execute: update_popup
 
 time:
@@ -150,7 +153,10 @@ time:
                 - delay: 30s
                 - if:
                     condition:
-                      update.is_available: fw_update
+                      lambda: |-
+                        const auto &i = id(fw_update).update_info;
+                        return id(fw_update).state == update::UPDATE_STATE_AVAILABLE &&
+                               version_newer(i.latest_version, i.current_version);
                     then:
                       - update.perform: fw_update
 
@@ -470,7 +476,7 @@ script:
           // Einstellungen: installierte und ggf. gefundene Version anzeigen
           {
             const std::string cur = info.current_version.empty() ? std::string("${fw_version}") : info.current_version;
-            const bool avail = fw->state == update::UPDATE_STATE_AVAILABLE && !info.latest_version.empty();
+            const bool avail = fw->state == update::UPDATE_STATE_AVAILABLE && version_newer(info.latest_version, cur);
             const std::string v = avail ? "Version " + cur + " \xC2\xB7 " + info.latest_version + " verfügbar"
                                         : "Version " + cur;
             lv_label_set_text(id(lbl_fw_version), v.c_str());
@@ -491,7 +497,9 @@ script:
             return;
           }
 
-          const bool available = fw->state == update::UPDATE_STATE_AVAILABLE;
+          // ESPHome meldet "verfügbar", sobald die Versionsnummer nur anders ist – wir zeigen nur neuere an
+          const std::string cur_v = info.current_version.empty() ? std::string("${fw_version}") : info.current_version;
+          const bool available = fw->state == update::UPDATE_STATE_AVAILABLE && version_newer(info.latest_version, cur_v);
           if (!available || id(setup_mode) || info.latest_version == id(upd_dismissed)) {
             show(id(upd_popup), false);
             return;

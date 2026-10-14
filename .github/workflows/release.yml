@@ -70,10 +70,22 @@ jobs:
           # Nichtssagende Commits ausfiltern (Versionsnummern, "push", "test", GitHub-Web-Standardtexte)
           if [ -n "$PREV" ]; then RANGE="$PREV..$REF"; else RANGE="$REF"; fi
           CHANGES=$(git log --no-merges --pretty='%s' "$RANGE" \
-            | grep -viE '^(v?[0-9.]+|push|test|wip|fix|\.|add files via upload|(create|delete|update) [^ ]+)$' \
+            | grep -viE '^(v?[0-9.]+|push|test|wip|fix|\.|add files via upload|(create|delete|update) [^ ]+\.[a-z0-9]+)$' \
             | grep -vxF "$HEADLINE" \
             | head -n 8 | sed 's/^/- /' || true)
+          # Alles weggefiltert und keine Tag-Nachricht: wenigstens die Überschrift des Commits zeigen
+          if [ -z "$HEADLINE$CHANGES" ]; then
+            CHANGES="- $(git log -1 --pretty='%s' "$REF")"
+          fi
           echo "Vorheriges Release: ${PREV:-keins}"
+
+          # Schutz: derselbe Commit wurde schon unter einer anderen Version veröffentlicht.
+          # Sonst bieten Geräte "Updates" ohne Änderung an (1.5.2 -> 1.5.3 mit gleichem Inhalt).
+          OTHER=$(git tag --points-at "$(git rev-parse "$REF^{commit}")" --list 'v[0-9]*' | grep -vxF "$TAG" | head -n 1 || true)
+          if [ -n "$OTHER" ]; then
+            echo "::error::Dieser Commit ist bereits als $OTHER veröffentlicht. Erst Änderungen committen, dann neu taggen."
+            exit 1
+          fi
           {
             echo "summary<<__SUMMARY_END__"
             [ -n "$HEADLINE" ] && echo "$HEADLINE"

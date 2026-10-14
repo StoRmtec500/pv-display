@@ -182,6 +182,30 @@ inline std::string ip_list(const std::vector<std::string> &ips) {
 
 }  // namespace pv
 
+// true, wenn Version a neuer ist als b ("1.10.0" > "1.9.3"; Zusatz wie "-beta.1" ist älter
+// als die gleiche Version ohne Zusatz). Verhindert, dass ältere Versionen als Update gelten.
+inline bool version_newer(const std::string &a, const std::string &b) {
+  auto parse = [](const std::string &v, int out[3], std::string &pre) {
+    out[0] = out[1] = out[2] = 0;
+    size_t i = 0;
+    for (int part = 0; part < 3 && i < v.size(); part++) {
+      int n = 0;
+      while (i < v.size() && v[i] >= '0' && v[i] <= '9') n = n * 10 + (v[i++] - '0');
+      out[part] = n;
+      if (i < v.size() && v[i] == '.') i++;
+    }
+    pre = i < v.size() && v[i] == '-' ? v.substr(i + 1) : std::string();
+  };
+  int va[3], vb[3];
+  std::string pa, pb;
+  parse(a, va, pa);
+  parse(b, vb, pb);
+  for (int k = 0; k < 3; k++)
+    if (va[k] != vb[k]) return va[k] > vb[k];
+  if (pa.empty() != pb.empty()) return pa.empty();   // 1.5.0 > 1.5.0-beta
+  return pa > pb;
+}
+
 // Release-Beschreibung (mehrzeilig, "- "-Liste) für das Update-Popup aufbereiten:
 // höchstens max_lines Zeilen, jede höchstens max_chars Zeichen (UTF-8-sicher gekürzt),
 // "- " am Zeilenanfang wird zu "· " (Glyphe ist in allen Display-Schriften enthalten).
