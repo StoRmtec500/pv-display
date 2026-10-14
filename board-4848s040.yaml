@@ -300,6 +300,103 @@ lvgl:
                   text_color: 0xF1F5F9
                   text: "WLAN einrichten: Mit dem Handy das WLAN „${setup_ssid}“ verbinden (Passwort: ${setup_password}) und den Anweisungen folgen."
 
+    # ======================= Ersteinrichtung =======================
+    # Wird beim Start gezeigt, solange kein Wechselrichter gespeichert ist.
+    # Inhalt setzt das Script setup_render in common.yaml.
+    - id: page_setup
+      bg_color: 0x0B1120
+      widgets:
+        - label:
+            align: TOP_MID
+            y: 34
+            text: "Willkommen"
+            text_font: font_m
+            text_color: 0xF1F5F9
+        - label:
+            id: setup_step
+            align: TOP_MID
+            y: 68
+            text: ""
+            text_color: 0x94A3B8
+        - label:
+            align: TOP_MID
+            y: 104
+            text: "\U000F0A72"
+            text_font: font_icon
+            text_color: 0xFACC15
+        - label:
+            id: setup_text
+            align: TOP_MID
+            y: 162
+            width: 420
+            long_mode: WRAP
+            text_align: CENTER
+            text: ""
+            text_color: 0xF1F5F9
+        - label:
+            id: setup_ip_caption
+            align: TOP_MID
+            y: 252
+            text: ""
+            text_color: 0x94A3B8
+        - label:
+            id: setup_ip
+            align: TOP_MID
+            y: 276
+            text: ""
+            text_font: font_m
+            text_color: 0x60A5FA
+        - bar:
+            id: setup_bar
+            align: TOP_MID
+            y: 330
+            width: 380
+            height: 10
+            min_value: 0
+            max_value: 100
+            value: 0
+            bg_color: 0x334155
+            indicator:
+              bg_color: 0x2563EB
+        - label:
+            id: setup_status
+            align: TOP_MID
+            y: 352
+            width: 420
+            long_mode: DOT
+            text_align: CENTER
+            text: ""
+            text_color: 0x94A3B8
+        - button:
+            id: btn_setup_retry
+            hidden: true
+            align: BOTTOM_MID
+            x: -100
+            y: -28
+            width: 190
+            height: 48
+            styles: st_btn
+            bg_color: 0x2563EB
+            on_click:
+              - lambda: |-
+                  id(scan_repair) = false;
+                  fronius_scan::start();
+              - script.execute: setup_render
+            widgets:
+              - label: { align: CENTER, text: "Erneut suchen", text_color: 0xFFFFFF }
+        - button:
+            align: BOTTOM_MID
+            x: 100
+            y: -28
+            width: 190
+            height: 48
+            styles: st_btn
+            on_click:
+              - lambda: id(setup_mode) = false;
+              - lvgl.page.show: page_main
+            widgets:
+              - label: { align: CENTER, text: "Überspringen", text_color: 0xF1F5F9 }
+
     # ======================= Energiefluss =======================
     # Knoten: PV oben, Netz links, Akku rechts, Haus unten; Mitte bei (240/250)
     - id: page_flow

@@ -41,6 +41,17 @@ esphome:
             state:
               checked: !lambda return id(auto_update).state;
         - script.execute: update_ip_label
+        # Ersteinrichtung: noch kein Wechselrichter gespeichert -> Einrichtungsseite
+        - if:
+            condition:
+              lambda: |-
+                return id(fronius_ip).state.empty() && id(fronius_ip2).state.empty() && id(fronius_ip3).state.empty();
+            then:
+              - lambda: id(setup_mode) = true;
+              - lvgl.page.show:
+                  id: page_setup
+                  animation: NONE
+              - script.execute: setup_render
 
 logger:
   level: INFO
@@ -61,8 +72,10 @@ wifi:
           id(scan_repair) = false;
           fronius_scan::start();
         }
+    - script.execute: setup_render
   on_disconnect:
     - lvgl.widget.show: hint_box
+    - script.execute: setup_render
 
 captive_portal:
 
@@ -141,6 +154,12 @@ globals:
     type: int
     initial_value: "-1"
   - id: scan_repair               # true = automatische Suche, ersetzt nur fehlende Wechselrichter
+    type: bool
+    initial_value: "false"
+  - id: setup_mode                # true = Einrichtungsseite ist aktiv (Ersteinrichtung)
+    type: bool
+    initial_value: "false"
+  - id: setup_exit                # von setup_render gesetzt: jetzt zur Übersicht wechseln
     type: bool
     initial_value: "false"
   - id: flow_active               # Animation nur rechnen, wenn Seite sichtbar
@@ -429,6 +448,91 @@ script:
           const std::string txt = pv::ip_list({id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state});
           lv_label_set_text(id(lbl_ip), txt.c_str());
 
+  # Ersteinrichtung: Einrichtungsseite je nach Zustand befüllen.
+  # Läuft nur, solange setup_mode aktiv ist (alle 300 ms + bei WLAN-Wechsel).
+  - id: setup_render
+    then:
+      - lambda: |-
+          if (!id(setup_mode)) return;
+          using fronius_scan::State;
+
+          auto set = [](lv_obj_t *o, const std::string &t) {
+            if (strcmp(lv_label_get_text(o), t.c_str()) != 0) lv_label_set_text(o, t.c_str());
+          };
+          auto show = [](lv_obj_t *o, bool visible) {
+            if (visible) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+
+          const std::string ips[3] = {id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state};
+          int count = 0;
+          for (const auto &ip : ips) count += ip.empty() ? 0 : 1;
+          const bool wifi_ok = wifi::global_wifi_component->is_connected();
+          const std::string own = id(own_ip).state;
+          const std::string web = own.empty() ? std::string("–") : "http://" + own;
+          static uint32_t done_at = 0;
+
+          // Fertig: gefunden oder über die Weboberfläche eingetragen
+          if (count > 0) {
+            if (done_at == 0) done_at = millis();
+            set(id(setup_step), "Einrichtung abgeschlossen");
+            set(id(setup_text), count == 1 ? std::string("1 Wechselrichter gefunden")
+                                           : str_sprintf("%d Wechselrichter gefunden", count));
+            set(id(setup_ip_caption), "Weboberfläche");
+            set(id(setup_ip), web);
+            set(id(setup_status), pv::ip_list({ips[0], ips[1], ips[2]}));
+            lv_bar_set_value(id(setup_bar), 100, LV_ANIM_OFF);
+            show(id(setup_bar), true);
+            show(id(btn_setup_retry), false);
+            // Ergebnis 5 s stehen lassen, damit man die IP abschreiben kann
+            if (millis() - done_at > 5000) {
+              done_at = 0;
+              id(setup_mode) = false;
+              id(setup_exit) = true;
+            }
+            return;
+          }
+          done_at = 0;
+
+          // Schritt 1: WLAN
+          if (!wifi_ok) {
+            set(id(setup_step), "Schritt 1 von 2 · WLAN");
+            set(id(setup_text), "Mit dem Handy das WLAN \"${setup_ssid}\" verbinden "
+                                "(Passwort: ${setup_password}) und das eigene WLAN auswählen.");
+            set(id(setup_ip_caption), "Öffnet sich keine Seite:");
+            set(id(setup_ip), "http://192.168.4.1");
+            set(id(setup_status), "");
+            show(id(setup_bar), false);
+            show(id(btn_setup_retry), false);
+            return;
+          }
+
+          // Schritt 2: Wechselrichter suchen
+          set(id(setup_step), "Schritt 2 von 2 · Wechselrichter");
+          set(id(setup_ip_caption), "Weboberfläche dieses Displays");
+          set(id(setup_ip), web);
+          const State st = fronius_scan::state();
+          if (st == State::NOT_FOUND) {
+            set(id(setup_text), "Kein Wechselrichter gefunden. Ist er eingeschaltet und im selben "
+                                "Netzwerk? Die IP kann auch über die Weboberfläche eingetragen werden.");
+            set(id(setup_status), "");
+            show(id(setup_bar), false);
+            show(id(btn_setup_retry), true);
+          } else {
+            const int p = st == State::RUNNING ? fronius_scan::progress() : 0;
+            set(id(setup_text), "Fronius-Wechselrichter im Netzwerk werden gesucht …");
+            set(id(setup_status), st == State::RUNNING ? str_sprintf("%d %%", p) : std::string("Suche startet …"));
+            lv_bar_set_value(id(setup_bar), p, LV_ANIM_ON);
+            show(id(setup_bar), true);
+            show(id(btn_setup_retry), false);
+          }
+      - if:
+          condition:
+            lambda: return id(setup_exit);
+          then:
+            - lambda: id(setup_exit) = false;
+            - lvgl.page.show: page_main
+
 interval:
   # Wechselrichter reihum abfragen: alle 2 s einer (bei zweien also je alle 4 s).
   # Die Abfrage blockiert kurz – deshalb nie mehrere auf einmal.
@@ -555,4 +659,9 @@ interval:
             lv_label_set_text(id(lbl_scan), msg.c_str());
             id(scan_status).publish_state(msg);
           }
+      - if:
+          condition:
+            lambda: return id(setup_mode);
+          then:
+            - script.execute: setup_render
 
