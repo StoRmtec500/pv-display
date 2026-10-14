@@ -9,6 +9,9 @@ substitutions:
   project_name: mksoft.pv-display
   # Bestehende Geräte holen ihre Updates hier – Pfad nicht ändern
   update_manifest: https://update.mksoft.at/pv-display/manifest.json
+  # Update-Popup: so viele Zeilen der Release-Beschreibung / Zeichen pro Zeile
+  upd_lines: "6"
+  upd_line_chars: "40"
   # Energiefluss-Seite: Mittelpunkt und Kanten der Knoten (Pixel)
   flow_cx: "240"
   flow_cy: "250"
@@ -160,7 +163,7 @@ lvgl:
             - obj:
                 align: CENTER
                 width: 400
-                height: 280
+                height: 340
                 bg_color: 0x1E293B
                 bg_opa: COVER
                 border_width: 1
@@ -699,7 +702,7 @@ lvgl:
                           - switch.turn_on: auto_update
                         else:
                           - switch.turn_off: auto_update
-              - label: { align: LEFT_MID, y: 2, text: "Version ${fw_version}", text_color: 0xF1F5F9 }
+              - label: { id: lbl_fw_version, align: LEFT_MID, y: 2, text: "Version ${fw_version}", text_color: 0xF1F5F9 }
               - label: { id: lbl_web, align: BOTTOM_LEFT, text: "Web: --", text_color: 0x64748B }
               - button:
                   align: BOTTOM_RIGHT
@@ -711,8 +714,9 @@ lvgl:
                         condition:
                           update.is_available: fw_update
                         then:
-                          - lvgl.label.update: { id: lbl_update_btn, text: "Installiere …" }
-                          - update.perform: fw_update
+                          # Details im Popup zeigen, dort wird installiert
+                          - lambda: id(upd_dismissed) = "";
+                          - script.execute: update_popup
                         else:
                           - lvgl.label.update: { id: lbl_update_btn, text: "Prüfe …" }
                           - component.update: fw_update

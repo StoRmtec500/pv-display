@@ -207,6 +207,7 @@ function template() {
           </button>
         </div>
         <p class="${label}" data-ref="fwInfo">Version –</p>
+        <div class="hidden rounded-xl bg-slate-900/60 p-3 text-sm" data-ref="fwNotes"></div>
         <button type="button" class="${btn} w-full" data-ref="fwButton" data-action="firmware">Nach Updates suchen</button>
       </section>
 
@@ -237,7 +238,7 @@ function template() {
     <div class="w-full max-w-sm space-y-3 rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl">
       <h2 id="upd-title" class="text-lg font-semibold" data-ref="updTitle"></h2>
       <p class="text-sm text-slate-300" data-ref="updText"></p>
-      <p class="text-sm text-slate-400" data-ref="updSummary"></p>
+      <div class="text-sm text-slate-300" data-ref="updSummary"></div>
       <div class="h-2 overflow-hidden rounded-full bg-slate-700" data-ref="updProgress">
         <div class="h-full w-1/3 animate-pulse rounded-full bg-blue-500"></div>
       </div>
@@ -403,7 +404,48 @@ function renderSettings() {
     fwButton.dataset.mode = available ? 'install' : 'check';
     fwButton.className = `${available ? btnPrimary : btn} w-full`;
     fwButton.disabled = installing;
+    const notesEl = ref('fwNotes');
+    const notes = available ? (fw?.summary ?? '') : '';
+    notesEl.classList.toggle('hidden', notes === '');
+    renderNotes(notesEl, notes, fw?.latest_version ?? '');
     renderUpdateModal(fw, available, installing);
+}
+const renderedNotesKey = new WeakMap();
+function renderNotes(el, summary, version) {
+    const key = `${version}\u0000${summary}`;
+    if (renderedNotesKey.get(el) === key)
+        return;
+    renderedNotesKey.set(el, key);
+    el.replaceChildren();
+    const lines = summary.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0)
+        return;
+    if (version) {
+        const head = document.createElement('p');
+        head.className = 'mb-1 font-medium text-slate-200';
+        head.textContent = `Neu in Version ${version}`;
+        el.append(head);
+    }
+    let list = null;
+    for (const line of lines) {
+        if (line.startsWith('- ')) {
+            if (!list) {
+                list = document.createElement('ul');
+                list.className = 'list-disc space-y-0.5 pl-5 text-slate-300';
+                el.append(list);
+            }
+            const li = document.createElement('li');
+            li.textContent = line.slice(2);
+            list.append(li);
+        }
+        else {
+            list = null;
+            const p = document.createElement('p');
+            p.className = 'text-slate-300';
+            p.textContent = line;
+            el.append(p);
+        }
+    }
 }
 const DISMISS_KEY = 'pv-upd-dismissed';
 let dismissedInPage = '';
@@ -423,12 +465,12 @@ function renderUpdateModal(fw, available, installing) {
     modal.classList.toggle('flex', visible);
     if (!visible)
         return;
-    setText('updTitle', installing ? 'Update wird installiert' : 'Neue Version verfügbar');
+    setText('updTitle', installing ? 'Update wird installiert' : `Version ${latest} verfügbar`);
     setText('updText', installing
         ? 'Das Display lädt die neue Firmware und startet danach neu. Bitte nicht ausschalten – diese Seite verbindet sich danach selbst wieder.'
         : `Version ${latest} ist verfügbar (installiert: ${fw?.current_version ?? '–'}).` +
             (bool(E.autoUpdate) ? ' Sonst wird sie heute Nacht automatisch installiert.' : ''));
-    setText('updSummary', installing ? '' : (fw?.summary ?? '').split('\n')[0]);
+    renderNotes(ref('updSummary'), installing ? '' : (fw?.summary ?? ''), installing ? '' : latest);
     ref('updProgress').classList.toggle('hidden', !installing);
     ref('updButtons').classList.toggle('hidden', installing);
 }

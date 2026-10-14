@@ -181,3 +181,33 @@ inline std::string ip_list(const std::vector<std::string> &ips) {
 }
 
 }  // namespace pv
+
+// Release-Beschreibung (mehrzeilig, "- "-Liste) für das Update-Popup aufbereiten:
+// höchstens max_lines Zeilen, jede höchstens max_chars Zeichen (UTF-8-sicher gekürzt),
+// "- " am Zeilenanfang wird zu "· " (Glyphe ist in allen Display-Schriften enthalten).
+inline std::vector<std::string> upd_summary_lines(const std::string &summary, size_t max_lines, size_t max_chars) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  while (start <= summary.size() && out.size() < max_lines) {
+    size_t end = summary.find('\n', start);
+    if (end == std::string::npos) end = summary.size();
+    std::string line = summary.substr(start, end - start);
+    start = end + 1;
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) line.pop_back();
+    if (line.empty()) continue;
+    if (line.rfind("- ", 0) == 0) line = "\xC2\xB7 " + line.substr(2);
+
+    // Zeichen (nicht Bytes) zählen und ggf. kürzen
+    size_t chars = 0, cut = std::string::npos;
+    for (size_t i = 0; i < line.size(); i++) {
+      if ((line[i] & 0xC0) == 0x80) continue;   // Folgebyte eines UTF-8-Zeichens
+      if (chars == max_chars - 3) cut = i;
+      chars++;
+    }
+    if (chars > max_chars && cut != std::string::npos) line = line.substr(0, cut) + "...";
+    out.push_back(line);
+  }
+  // Mehr Zeilen vorhanden als Platz: letzte Zeile als Hinweis ersetzen
+  if (out.size() == max_lines && start < summary.size()) out.back() = "\xC2\xB7 ...";
+  return out;
+}

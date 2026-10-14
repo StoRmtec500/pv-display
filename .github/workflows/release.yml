@@ -55,9 +55,32 @@ jobs:
             exit 1
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          # Tag-Nachricht als Update-Hinweis am Display / in der Weboberfläche
-          S=$(git tag -l --format='%(contents:subject)' "v$V" 2>/dev/null || true)
-          echo "summary=${S:-Version $V}" >> "$GITHUB_OUTPUT"
+
+          # Beschreibung fürs Update-Popup:
+          #   1. Zeile  = Nachricht eines annotierten Tags (git tag -a … -m "…"), falls vorhanden
+          #   danach    = Commit-Nachrichten seit dem vorigen Release als "- …"-Liste
+          # Gekürzt wird später in tools/make-manifest.ts (max. 250 Bytes, ganze Zeilen).
+          TAG="v$V"
+          REF="$TAG"; git rev-parse -q --verify "$REF^{commit}" >/dev/null || REF=HEAD
+          PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$REF^" 2>/dev/null || true)
+          HEADLINE=""
+          if [ "$(git cat-file -t "$TAG" 2>/dev/null)" = "tag" ]; then
+            HEADLINE=$(git tag -l --format='%(contents:subject)' "$TAG")
+          fi
+          # Nichtssagende Commits ausfiltern (Versionsnummern, "push", "test", GitHub-Web-Standardtexte)
+          if [ -n "$PREV" ]; then RANGE="$PREV..$REF"; else RANGE="$REF"; fi
+          CHANGES=$(git log --no-merges --pretty='%s' "$RANGE" \
+            | grep -viE '^(v?[0-9.]+|push|test|wip|fix|\.|add files via upload|(create|delete|update) [^ ]+)$' \
+            | grep -vxF "$HEADLINE" \
+            | head -n 8 | sed 's/^/- /' || true)
+          echo "Vorheriges Release: ${PREV:-keins}"
+          {
+            echo "summary<<__SUMMARY_END__"
+            [ -n "$HEADLINE" ] && echo "$HEADLINE"
+            [ -n "$CHANGES" ] && echo "$CHANGES"
+            [ -z "$HEADLINE$CHANGES" ] && echo "Version $V"
+            echo "__SUMMARY_END__"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: version

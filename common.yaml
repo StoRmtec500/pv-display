@@ -467,6 +467,15 @@ script:
           auto *fw = id(fw_update);
           const auto &info = fw->update_info;
 
+          // Einstellungen: installierte und ggf. gefundene Version anzeigen
+          {
+            const std::string cur = info.current_version.empty() ? std::string("${fw_version}") : info.current_version;
+            const bool avail = fw->state == update::UPDATE_STATE_AVAILABLE && !info.latest_version.empty();
+            const std::string v = avail ? "Version " + cur + " \xC2\xB7 " + info.latest_version + " verfügbar"
+                                        : "Version " + cur;
+            lv_label_set_text(id(lbl_fw_version), v.c_str());
+          }
+
           if (fw->state == update::UPDATE_STATE_INSTALLING) {
             lv_label_set_text(id(upd_title), "Update wird installiert");
             lv_label_set_text(id(upd_text), "Bitte nicht ausschalten.\nDas Display startet danach neu.");
@@ -488,20 +497,14 @@ script:
             return;
           }
 
-          lv_label_set_text(id(upd_title), "Neue Version verfügbar");
-          std::string txt = "Version " + info.latest_version + " (installiert: " + info.current_version + ")";
-          if (!info.summary.empty()) {
-            // Tag-Nachricht aus dem Release; lang = abschneiden (kleines Display)
-            std::string sum = info.summary.substr(0, info.summary.find('\n'));
-            if (sum.size() > 90) {
-              size_t cut = 87;
-              while (cut > 0 && (sum[cut] & 0xC0) == 0x80) cut--;   // UTF-8 nicht mitten im Zeichen trennen
-              sum = sum.substr(0, cut) + "...";
-            }
-            txt += "\n" + sum;
-          }
-          if (fw->status_has_error()) txt += "\nDer letzte Installationsversuch ist fehlgeschlagen.";
-          else if (id(auto_update).state) txt += "\nSonst wird es heute Nacht automatisch installiert.";
+          lv_label_set_text(id(upd_title), str_sprintf("Version %s verfügbar", info.latest_version.c_str()).c_str());
+          std::string txt = "Installiert: " + (info.current_version.empty() ? std::string("${fw_version}") : info.current_version);
+          // Beschreibung aus dem Release (Tag-Nachricht + Commits), Zeilen an die Displaygröße anpassen
+          std::vector<std::string> lines = upd_summary_lines(info.summary, ${upd_lines}, ${upd_line_chars});
+          if (!lines.empty()) txt += "\n";
+          for (const auto &l : lines) txt += "\n" + l;
+          if (fw->status_has_error()) txt += "\n\nDer letzte Installationsversuch ist fehlgeschlagen.";
+          else if (id(auto_update).state) txt += "\n\nSonst wird es heute Nacht automatisch installiert.";
           lv_label_set_text(id(upd_text), txt.c_str());
           show(id(upd_bar), false);
           show(id(upd_pct), false);

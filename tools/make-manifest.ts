@@ -59,6 +59,35 @@ interface CliOptions {
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
+// Die ESPHome-Weboberfläche schneidet "summary" nach 256 Bytes ab – mit Reserve kürzen,
+// und zwar nur an Zeilengrenzen, damit keine halbe Zeile oder ein halbes UTF-8-Zeichen entsteht.
+const SUMMARY_MAX_BYTES = 250;
+
+function normalizeSummary(raw: string, version: string): string {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return `Version ${version}`;
+
+  const kept: string[] = [];
+  for (const line of lines) {
+    const candidate = [...kept, line].join('\n');
+    if (Buffer.byteLength(candidate, 'utf8') <= SUMMARY_MAX_BYTES) {
+      kept.push(line);
+      continue;
+    }
+    if (kept.length === 0) {
+      // Schon die erste Zeile ist zu lang: zeichenweise kürzen
+      let cut = line;
+      while (Buffer.byteLength(`${cut}…`, 'utf8') > SUMMARY_MAX_BYTES) cut = cut.slice(0, -1);
+      kept.push(`${cut.trimEnd()}…`);
+    }
+    break;
+  }
+  return kept.join('\n');
+}
+
 function readOptions(): CliOptions {
   const { values } = parseArgs({
     options: {
@@ -99,7 +128,7 @@ function readOptions(): CliOptions {
     chip: chip as ChipFamily,
     ota: values.ota as string,
     factory: values.factory as string,
-    summary: values.summary?.trim() || `Version ${version}`,
+    summary: normalizeSummary(values.summary ?? '', version),
     releaseUrl: values['release-url'] || undefined,
   };
 }
