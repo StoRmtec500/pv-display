@@ -255,7 +255,7 @@ switch:
     name: Automatische Updates
     icon: mdi:update
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF   # Auto-Update muss der Kunde selbst einschalten
 
 button:
   - platform: template
