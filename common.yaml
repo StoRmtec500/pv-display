@@ -41,6 +41,10 @@ esphome:
             state:
               checked: !lambda return id(auto_update).state;
         - script.execute: update_ip_label
+        # Update-Popup bei jeder Statusänderung der Firmware-Entität neu zeichnen –
+        # auch während der Installation (die blockiert die normale Anzeige)
+        - lambda: |-
+            id(fw_update)->add_on_state_callback([]() { id(update_popup)->execute(); });
         # Ersteinrichtung: noch kein Wechselrichter gespeichert -> Einrichtungsseite
         - if:
             condition:
@@ -113,6 +117,7 @@ update:
       - lvgl.label.update:
           id: lbl_update_btn
           text: !lambda return std::string("Update ") + id(fw_update).update_info.latest_version;
+      - script.execute: update_popup
 
 time:
   - platform: sntp
@@ -156,6 +161,9 @@ globals:
   - id: scan_repair               # true = automatische Suche, ersetzt nur fehlende Wechselrichter
     type: bool
     initial_value: "false"
+  - id: upd_dismissed             # mit "Später" weggeklickte Version (bis zum Neustart)
+    type: std::string
+    initial_value: '""'
   - id: setup_mode                # true = Einrichtungsseite ist aktiv (Ersteinrichtung)
     type: bool
     initial_value: "false"
@@ -448,6 +456,58 @@ script:
           const std::string txt = pv::ip_list({id(fronius_ip).state, id(fronius_ip2).state, id(fronius_ip3).state});
           lv_label_set_text(id(lbl_ip), txt.c_str());
 
+  # Update-Popup über allen Seiten (top_layer in den Board-Dateien)
+  - id: update_popup
+    then:
+      - lambda: |-
+          auto show = [](lv_obj_t *o, bool visible) {
+            if (visible) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+          auto *fw = id(fw_update);
+          const auto &info = fw->update_info;
+
+          if (fw->state == update::UPDATE_STATE_INSTALLING) {
+            lv_label_set_text(id(upd_title), "Update wird installiert");
+            lv_label_set_text(id(upd_text), "Bitte nicht ausschalten.\nDas Display startet danach neu.");
+            const int p = info.has_progress ? (int) info.progress : 0;
+            lv_bar_set_value(id(upd_bar), p, LV_ANIM_OFF);
+            lv_label_set_text(id(upd_pct), str_sprintf("%d %%", p).c_str());
+            show(id(upd_bar), true);
+            show(id(upd_pct), true);
+            show(id(upd_buttons), false);
+            show(id(upd_popup), true);
+            // Die Installation blockiert die Hauptschleife: sofort zeichnen
+            lv_refr_now(nullptr);
+            return;
+          }
+
+          const bool available = fw->state == update::UPDATE_STATE_AVAILABLE;
+          if (!available || id(setup_mode) || info.latest_version == id(upd_dismissed)) {
+            show(id(upd_popup), false);
+            return;
+          }
+
+          lv_label_set_text(id(upd_title), "Neue Version verfügbar");
+          std::string txt = "Version " + info.latest_version + " (installiert: " + info.current_version + ")";
+          if (!info.summary.empty()) {
+            // Tag-Nachricht aus dem Release; lang = abschneiden (kleines Display)
+            std::string sum = info.summary.substr(0, info.summary.find('\n'));
+            if (sum.size() > 90) {
+              size_t cut = 87;
+              while (cut > 0 && (sum[cut] & 0xC0) == 0x80) cut--;   // UTF-8 nicht mitten im Zeichen trennen
+              sum = sum.substr(0, cut) + "...";
+            }
+            txt += "\n" + sum;
+          }
+          if (fw->status_has_error()) txt += "\nDer letzte Installationsversuch ist fehlgeschlagen.";
+          else if (id(auto_update).state) txt += "\nSonst wird es heute Nacht automatisch installiert.";
+          lv_label_set_text(id(upd_text), txt.c_str());
+          show(id(upd_bar), false);
+          show(id(upd_pct), false);
+          show(id(upd_buttons), true);
+          show(id(upd_popup), true);
+
   # Ersteinrichtung: Einrichtungsseite je nach Zustand befüllen.
   # Läuft nur, solange setup_mode aktiv ist (alle 300 ms + bei WLAN-Wechsel).
   - id: setup_render
@@ -532,6 +592,7 @@ script:
           then:
             - lambda: id(setup_exit) = false;
             - lvgl.page.show: page_main
+            - script.execute: update_popup
 
 interval:
   # Wechselrichter reihum abfragen: alle 2 s einer (bei zweien also je alle 4 s).
