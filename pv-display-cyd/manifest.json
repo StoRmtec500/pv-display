@@ -1,0 +1,23 @@
+{
+  "name": "PV Display 2.8\"",
+  "version": "1.6.4",
+  "home_assistant_domain": "esphome",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "ota": {
+        "path": "https://update.mksoft.at/pv-display-cyd/pv-display-cyd-1.6.4.ota.bin",
+        "md5": "c28bc9e8df0357a75aeb2cbd108113a4",
+        "summary": "- Einstellunge für Anzeige wurde nicht übernommen",
+        "release_url": "https://github.com/StoRmtec500/pv-display/releases/tag/v1.6.4"
+      },
+      "parts": [
+        {
+          "path": "https://update.mksoft.at/pv-display-cyd/pv-display-cyd-1.6.4.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
