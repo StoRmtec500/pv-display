@@ -254,6 +254,13 @@ number:
     optimistic: true
     restore_value: true
     initial_value: 10
+    # Ring sofort mit der neuen Anlagenleistung neu berechnen
+    on_value:
+      - lvgl.arc.update:
+          id: arc_pv
+          value: !lambda |-
+            const float pv = id(p_pv).state;
+            return std::isnan(pv) ? 0 : (int) std::min(100.0f, std::max(0.0f, pv / (x * 10.0f)));
 
 switch:
   - platform: template

@@ -191,7 +191,7 @@ function template() {
         <label class="block space-y-1">
           <span class="${label}">Anlagenleistung gesamt (kWp)</span>
           <div class="flex gap-2">
-            <input type="number" min="1" max="100" step="0.1" class="${input}" data-ref="peak">
+            <input type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" class="${input}" data-ref="peak" aria-label="Anlagenleistung in kWp">
             <button type="button" class="${btn}" data-action="savePeak">Speichern</button>
           </div>
           <span class="block text-xs text-slate-500">Bestimmt, wie weit sich der Ring füllt.</span>
@@ -519,7 +519,16 @@ ipForm.addEventListener('submit', async (ev) => {
 });
 brightness.addEventListener('input', () => setText('brightnessVal', `${brightness.value} %`));
 brightness.addEventListener('change', () => void post(E.brightness, 'set', brightness.value));
+let lastSentPeak = null;
 peakInput.addEventListener('input', () => (peakInput.dataset.dirty = '1'));
+peakInput.addEventListener('change', () => {
+    if (peakInput.dataset.dirty)
+        void actions.savePeak();
+});
+peakInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter')
+        peakInput.blur();
+});
 autoUpdate.addEventListener('click', async () => {
     const ok = await post(E.autoUpdate, bool(E.autoUpdate) ? 'turn_off' : 'turn_on');
     if (!ok)
@@ -530,12 +539,17 @@ const actions = {
         toast((await post(E.scan, 'press')) ? 'Suche gestartet' : 'Suche konnte nicht starten');
     },
     async savePeak() {
-        const v = Number(peakInput.value);
+        const v = Number(peakInput.value.trim().replace(',', '.'));
         if (!Number.isFinite(v) || v < 1 || v > 100) {
             toast('Bitte einen Wert zwischen 1 und 100 kWp eingeben');
             return;
         }
+        if (!peakInput.dataset.dirty && (v === lastSentPeak || v === num(E.peak))) {
+            toast('Gespeichert');
+            return;
+        }
         delete peakInput.dataset.dirty;
+        lastSentPeak = v;
         toast((await post(E.peak, 'set', v)) ? 'Gespeichert' : 'Speichern fehlgeschlagen');
     },
     async firmware() {
