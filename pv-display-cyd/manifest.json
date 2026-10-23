@@ -1,0 +1,23 @@
+{
+  "name": "PV Display 2.8\"",
+  "version": "2.0.2",
+  "home_assistant_domain": "esphome",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "ota": {
+        "path": "https://update.mksoft.at/pv-display-cyd/pv-display-cyd-2.0.2.ota.bin",
+        "md5": "3ab3e42b8f78e9554ece205889a439da",
+        "summary": "- APP: Design Update",
+        "release_url": "https://github.com/StoRmtec500/pv-display/releases/tag/v2.0.2"
+      },
+      "parts": [
+        {
+          "path": "https://update.mksoft.at/pv-display-cyd/pv-display-cyd-2.0.2.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

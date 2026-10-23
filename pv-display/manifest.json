@@ -1,0 +1,23 @@
+{
+  "name": "PV Display 4\"",
+  "version": "2.0.2",
+  "home_assistant_domain": "esphome",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "ota": {
+        "path": "https://update.mksoft.at/pv-display/pv-display-2.0.2.ota.bin",
+        "md5": "35a2af1948e7744b06458ded8c52ae55",
+        "summary": "- APP: Design Update",
+        "release_url": "https://github.com/StoRmtec500/pv-display/releases/tag/v2.0.2"
+      },
+      "parts": [
+        {
+          "path": "https://update.mksoft.at/pv-display/pv-display-2.0.2.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
