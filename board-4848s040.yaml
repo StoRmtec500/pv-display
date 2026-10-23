@@ -44,6 +44,14 @@ psram:
 # kollidiert mit GPIO19/20 (Touch-I2C bzw. Display-Daten) und zeigt dann nichts.
 logger:
   hardware_uart: UART0
+  # DIAGNOSE Touch (vorübergehend): ausführliches Log, Bus-Scan und jede Berührung.
+  # Wenn der Touch läuft, diese Zeilen samt "scan" und "on_touch" wieder entfernen.
+  level: DEBUG
+  logs:
+    sensor: INFO
+    text_sensor: INFO
+    number: INFO
+    lvgl: INFO
 
 # ---------------------------------------------------------------------------
 #  Hardware: Display, Touch, Hintergrundbeleuchtung
@@ -63,10 +71,15 @@ display:
 i2c:
   sda: GPIO19
   scl: GPIO45
+  scan: true                    # DIAGNOSE: gefundene I2C-Adressen ins Log
 
 touchscreen:
   - platform: gt911
     id: touch
+    on_touch:                   # DIAGNOSE: jede Berührung ins Log
+      - lambda: |-
+          for (auto t : touches)
+            ESP_LOGI("touch", "x=%d y=%d  raw_x=%d raw_y=%d", t.x, t.y, t.x_raw, t.y_raw);
 
 output:
   - platform: ledc
