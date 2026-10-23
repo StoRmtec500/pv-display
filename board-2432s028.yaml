@@ -514,12 +514,12 @@ lvgl:
                   radius: 10
                   border_width: 0
                   pad_all: 0
-                  bg_color: 0x172554
+                  bg_color: 0x450A0A
                   clickable: false
                   widgets:
-                    - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon_s, text_color: 0x60A5FA }
+                    - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon_s, text_color: 0xF87171 }
               - label: { x: 25, y: 3, text: "Haus", text_color: 0x8391A7 }
-              - label: { align: TOP_RIGHT, y: 3, text: "Verbrauch", text_color: 0x60A5FA }
+              - label: { align: TOP_RIGHT, y: 3, text: "Verbrauch", text_color: 0xF87171 }
               - obj:
                   styles: st_bare
                   align: BOTTOM_LEFT
@@ -790,10 +790,10 @@ lvgl:
             y: 192
             width: 44
             height: 44
-            border_color: 0x60A5FA
+            border_color: 0xF87171
             clickable: false
             widgets:
-              - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon, text_color: 0x60A5FA }
+              - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon, text_color: 0xF87171 }
 
         - label: { x: 192, y: 44, text: "Erzeugung", text_color: 0x8391A7 }
         - label: { id: lbl_f_pv, x: 192, y: 59, text: "--", text_font: font_m, text_color: 0xFDE047 }
@@ -802,12 +802,12 @@ lvgl:
         - label: { id: lbl_f_soc, x: 200, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0xF8FAFC }
         - label: { id: lbl_f_akku, x: 200, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x8391A7 }
         - label: { x: 192, y: 196, text: "Haus", text_color: 0x8391A7 }
-        - label: { id: lbl_f_load, x: 192, y: 211, text: "--", text_font: font_m, text_color: 0x93C5FD }
+        - label: { id: lbl_f_load, x: 192, y: 211, text: "--", text_font: font_m, text_color: 0xF87171 }
 
         - obj: { id: dot_pv,   hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xFDE047, clickable: false }
         - obj: { id: dot_grid, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xF8FAFC, clickable: false }
         - obj: { id: dot_akku, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x4ADE80, clickable: false }
-        - obj: { id: dot_haus, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x60A5FA, clickable: false }
+        - obj: { id: dot_haus, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xF87171, clickable: false }
 
     # ======================= Einstellungen =======================
     - id: page_settings
