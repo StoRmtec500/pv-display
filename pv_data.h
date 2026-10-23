@@ -150,8 +150,11 @@ inline bool use_watts(float w) { return std::fabs(w) < 999.5f; }
 inline std::string power_value(float w) {
   char buf[16];
   w = std::fabs(w);
+  // ab 10 kW eine, ab 100 kW keine Nachkommastelle – passt in den Ring
   if (use_watts(w)) snprintf(buf, sizeof(buf), "%.0f", w);
-  else snprintf(buf, sizeof(buf), "%.2f", w / 1000.0f);
+  else if (w < 9995.0f) snprintf(buf, sizeof(buf), "%.2f", w / 1000.0f);
+  else if (w < 99950.0f) snprintf(buf, sizeof(buf), "%.1f", w / 1000.0f);
+  else snprintf(buf, sizeof(buf), "%.0f", w / 1000.0f);
   return buf;
 }
 

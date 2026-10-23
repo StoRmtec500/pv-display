@@ -133,15 +133,11 @@ time:
       - 1.at.pool.ntp.org
       - pool.ntp.org
     on_time_sync:
-      - lvgl.label.update:
-          id: lbl_time
-          text: !lambda return id(sntp_time).now().strftime("%H:%M");
+      - script.execute: update_clock
     on_time:
       - seconds: 0
         then:
-          - lvgl.label.update:
-              id: lbl_time
-              text: !lambda return id(sntp_time).now().strftime("%H:%M");
+          - script.execute: update_clock
       # Nächtliches Auto-Update um 03:17
       - seconds: 0
         minutes: 17
@@ -263,6 +259,7 @@ number:
           value: !lambda |-
             const float pv = id(p_pv).state;
             return std::isnan(pv) ? 0 : (int) std::min(100.0f, std::max(0.0f, pv / (x * 10.0f)));
+      - script.execute: update_pv_sub
 
 switch:
   - platform: template
@@ -334,6 +331,7 @@ sensor:
       - lvgl.arc.update:
           id: arc_pv
           value: !lambda return (int) std::min(100.0f, std::max(0.0f, x / (id(pv_peak).state * 10.0f)));
+      - script.execute: update_pv_sub
 
   - platform: template
     id: p_grid
@@ -349,9 +347,10 @@ sensor:
           const char *sub = fabsf(x) < 20 ? "ausgeglichen" : (x > 0 ? "Bezug" : "Einspeisung");
           lv_label_set_text(id(lbl_grid_sub), sub);
           lv_label_set_text(id(lbl_f_grid_sub), sub);
-          lv_color_t c = fabsf(x) < 20 ? lv_color_hex(0xF1F5F9)
-                       : (x > 0 ? lv_color_hex(0xF87171) : lv_color_hex(0x4ADE80));
-          lv_obj_set_style_text_color(id(lbl_grid), c, 0);
+          // Bezug rot, Einspeisung grün, ausgeglichen neutral
+          const bool idle = fabsf(x) < 20;
+          lv_color_t c = idle ? lv_color_hex(0xF8FAFC) : (x > 0 ? lv_color_hex(0xF87171) : lv_color_hex(0x4ADE80));
+          lv_obj_set_style_text_color(id(lbl_grid_sub), idle ? lv_color_hex(0x8391A7) : c, 0);
           lv_obj_set_style_text_color(id(lbl_f_grid), c, 0);
           lv_obj_set_style_bg_color(id(dot_grid), c, 0);
 
@@ -375,10 +374,11 @@ sensor:
     update_interval: never
     on_value:
       - lambda: |-
-          const std::string txt = fabsf(x) < 20 ? std::string("Standby")
-                                : std::string(x < 0 ? "lädt " : "entlädt ") + pv::power_text(x);
-          lv_label_set_text(id(lbl_akku_sub), txt.c_str());
+          const char *state = fabsf(x) < 20 ? "Standby" : (x < 0 ? "lädt" : "entlädt");
+          const std::string txt = fabsf(x) < 20 ? std::string(state) : std::string(state) + " " + pv::power_text(x);
           lv_label_set_text(id(lbl_f_akku), txt.c_str());
+          // Kachel: mit Leistung nur, wenn das Board Platz dafür hat
+          lv_label_set_text(id(lbl_akku_sub), ${akku_tile_power} ? txt.c_str() : state);
 
   - platform: template
     id: soc
@@ -391,8 +391,10 @@ sensor:
       # verwechselt "%%" mit einem Platzhalter
       - lvgl.label.update:
           id: lbl_soc
-          text: !lambda |-
-            return str_sprintf("%.0f%%", x);
+          text: !lambda return str_sprintf("%.0f", x);
+      - lvgl.bar.update:
+          id: bar_soc
+          value: !lambda return (int) std::min(100.0f, std::max(0.0f, x));
       - lvgl.label.update:
           id: lbl_f_soc
           text: !lambda |-
@@ -408,6 +410,7 @@ sensor:
           id: lbl_autarkie
           text: !lambda |-
             return str_sprintf("%.0f %% autark", x);
+      - lvgl.widget.show: chip_autarkie
 
   - platform: template
     id: e_day
@@ -423,6 +426,29 @@ sensor:
             args: [ x ]
 
 script:
+  # Uhrzeit und Datum ("Fr, 23. Okt") in der Kopfzeile
+  - id: update_clock
+    then:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          if (!now.is_valid()) return;
+          static const char *const WD[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
+          static const char *const MO[] = {"Jän", "Feb", "März", "Apr", "Mai", "Juni",
+                                           "Juli", "Aug", "Sep", "Okt", "Nov", "Dez"};
+          lv_label_set_text(id(lbl_time), now.strftime("%H:%M").c_str());
+          lv_label_set_text(id(lbl_date), str_sprintf("%s, %d. %s", WD[(now.day_of_week + 6) % 7],
+                                                      now.day_of_month, MO[now.month - 1]).c_str());
+
+  # Zeile unter der PV-Leistung: "von 14 kWp · 49 %"
+  - id: update_pv_sub
+    then:
+      - lambda: |-
+          const float kwp = id(pv_peak).state, w = id(p_pv).state;
+          if (std::isnan(kwp) || kwp <= 0) return;
+          const std::string peak = fmodf(kwp, 1.0f) < 0.05f ? str_sprintf("%.0f", kwp) : str_sprintf("%.1f", kwp);
+          const int pct = std::isnan(w) ? 0 : (int) std::min(100.0f, std::max(0.0f, w / (kwp * 10.0f)) + 0.5f);
+          lv_label_set_text(id(lbl_pv_sub), str_sprintf("von %s kWp \xC2\xB7 %d %%", peak.c_str(), pct).c_str());
+
   # Werte aller Wechselrichter zusammenrechnen und anzeigen
   - id: publish_totals
     then:
@@ -442,7 +468,13 @@ script:
 
           // Status-Punkt: grün = alle, orange = einige, rot = keiner liefert Daten
           const uint32_t col = fresh == 0 ? 0xEF4444 : (fresh < configured ? 0xF59E0B : 0x22C55E);
-          lv_obj_set_style_bg_color(id(dot_status), lv_color_hex(col), 0);
+          static uint32_t last_col = 0;
+          if (col != last_col) {
+            last_col = col;
+            lv_obj_set_style_bg_color(id(dot_status), lv_color_hex(col), 0);
+            lv_label_set_text(id(lbl_status), fresh == 0 ? "Offline" : (fresh < configured ? "Teilweise" : "Live"));
+            lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(fresh == configured ? 0x4ADE80 : 0x8391A7), 0);
+          }
           id(fronius_online).publish_state(configured > 0 && fresh == configured);
 
           // Fehlt ein Wechselrichter länger als 2 min: automatisch neu suchen
@@ -462,12 +494,20 @@ script:
           static bool offline_shown = false;
           const bool offline = configured > 0 && !t.valid && now > 30000;
           if (offline && !offline_shown) {
-            lv_label_set_text(id(lbl_autarkie), "Wechselrichter nicht erreichbar");
+            lv_label_set_text(id(lbl_autarkie), "${offline_text}");
+            lv_label_set_text(id(ico_autarkie), "\U000F05D6");   // alert-circle-outline
             lv_obj_set_style_text_color(id(lbl_autarkie), lv_color_hex(0xF87171), 0);
+            lv_obj_set_style_text_color(id(ico_autarkie), lv_color_hex(0xF87171), 0);
+            lv_obj_set_style_border_color(id(chip_autarkie), lv_color_hex(0x7F1D1D), 0);
+            lv_obj_clear_flag(id(chip_autarkie), LV_OBJ_FLAG_HIDDEN);
             offline_shown = true;
           } else if (!offline && offline_shown) {
-            lv_label_set_text(id(lbl_autarkie), "");   // Autarkie-Wert setzt den Text gleich wieder
+            // Chip ausblenden – der nächste Autarkie-Wert zeigt ihn wieder an
+            lv_obj_add_flag(id(chip_autarkie), LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(id(ico_autarkie), "\U000F032A");   // leaf
             lv_obj_set_style_text_color(id(lbl_autarkie), lv_color_hex(0x4ADE80), 0);
+            lv_obj_set_style_text_color(id(ico_autarkie), lv_color_hex(0x4ADE80), 0);
+            lv_obj_set_style_border_color(id(chip_autarkie), lv_color_hex(0x14532D), 0);
             offline_shown = false;
           }
           if (!t.valid) return;   // letzte Werte stehen lassen
@@ -614,7 +654,7 @@ script:
             show(id(btn_setup_retry), true);
           } else {
             const int p = st == State::RUNNING ? fronius_scan::progress() : 0;
-            set(id(setup_text), "Fronius-Wechselrichter im Netzwerk werden gesucht …");
+            set(id(setup_text), "Fronius-Wechselrichter im Netzwerk werden gesucht\xC2\xA0…");
             set(id(setup_status), st == State::RUNNING ? str_sprintf("%d %%", p) : std::string("Suche startet …"));
             lv_bar_set_value(id(setup_bar), p, LV_ANIM_ON);
             show(id(setup_bar), true);
@@ -698,6 +738,30 @@ interval:
           move(id(dot_grid), 1, ${flow_left}, ${flow_cy}, ${flow_cx}, ${flow_cy}, g, g > 0);
           move(id(dot_akku), 2, ${flow_right}, ${flow_cy}, ${flow_cx}, ${flow_cy}, a, a > 0);
           move(id(dot_haus), 3, ${flow_cx}, ${flow_cy}, ${flow_cx}, ${flow_bottom}, id(p_load).state, true);
+
+          // Aktive Leitungen in der Farbe des Knotens, ruhende grau (nur bei Änderung neu zeichnen)
+          static uint32_t cache[7] = {1, 1, 1, 1, 1, 1, 1};
+          auto active = [](float w) { return !std::isnan(w) && fabsf(w) >= 20; };
+          auto line = [&](int k, lv_obj_t *o, bool on, uint32_t col) {
+            const uint32_t want = on ? col : 0x1E293B;
+            if (cache[k] == want) return;
+            cache[k] = want;
+            lv_obj_set_style_line_color(o, lv_color_hex(want), 0);
+            lv_obj_set_style_line_opa(o, on ? LV_OPA_60 : LV_OPA_COVER, 0);
+          };
+          auto ring = [&](int k, lv_obj_t *o, uint32_t want) {
+            if (cache[k] == want) return;
+            cache[k] = want;
+            lv_obj_set_style_border_color(o, lv_color_hex(want), 0);
+          };
+          const uint32_t grid_col = g > 0 ? 0xF87171 : 0x4ADE80;
+          line(0, id(ln_pv)->obj, active(id(p_pv).state), 0xFACC15);
+          line(1, id(ln_grid)->obj, active(g), grid_col);
+          line(2, id(ln_akku)->obj, active(a), 0x4ADE80);
+          line(3, id(ln_haus)->obj, active(id(p_load).state), 0x60A5FA);
+          ring(4, id(node_pv), active(id(p_pv).state) ? 0xFACC15 : 0x475569);
+          ring(5, id(node_grid), active(g) ? grid_col : 0x475569);
+          ring(6, id(node_akku), active(a) ? 0x4ADE80 : 0x334155);
 
   # Fortschritt der Wechselrichter-Suche ins Display übernehmen
   - interval: 300ms

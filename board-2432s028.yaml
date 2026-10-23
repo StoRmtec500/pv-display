@@ -14,7 +14,7 @@ substitutions:
   #   ESP32-2432S028        nur Micro-USB             (ILI9341)
   #   ESP32-2432S028-7789   Micro-USB + USB-C         (ST7789)
   #   ESP32-2432S028-9342   Micro-USB + USB-C, andere Charge (ILI9342)
-  cyd_model: ESP32-2432S028        # getestet: weißes Bild mit -7789, dieses Board hat ILI9341
+  cyd_model: ESP32-2432S028-7789
   # 90 = USB-Buchse rechts, 270 = USB-Buchse links
   cyd_rotation: "90"
 
@@ -29,6 +29,10 @@ substitutions:
   flow_left: "82"
   flow_right: "238"
   flow_dot_half: "5"
+  # Hinweis im Chip unter dem Ring, wenn kein Wechselrichter antwortet
+  offline_text: Keine Verbindung
+  # Akku-Kachel: nur "lädt"/"entlädt" (Leistung steht im Energiefluss)
+  akku_tile_power: "false"
 
 packages:
   common: !include common.yaml
@@ -108,6 +112,7 @@ light:
     restore_mode: ALWAYS_ON
     default_transition_length: 250ms
 
+
 # ---------------------------------------------------------------------------
 #  Schriften – klein gehalten wegen 4 MB Flash
 # ---------------------------------------------------------------------------
@@ -127,12 +132,13 @@ font:
     id: font_l
     size: 22
     bpp: 4
-    glyphs: "0123456789.,-% "
+    glyphs: "0123456789.,-%: "
   - file: { type: gfonts, family: Inter, weight: 700 }
     id: font_xl
     size: 40
     bpp: 4
     glyphs: "0123456789.,-"
+  # Symbole: Material Design Icons
   - file:
       type: web
       url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
@@ -140,22 +146,38 @@ font:
     size: 26
     bpp: 4
     glyphs:
-      - "\U000F0A72"   # solar-power
+      - "\U000F0D9C"   # solar-panel-large
       - "\U000F0D3E"   # transmission-tower
-      - "\U000F0079"   # battery
+      - "\U000F12A3"   # battery-high
       - "\U000F02DC"   # home
   - file:
       type: web
       url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
-    id: font_icon_s
+    id: font_icon_m
     size: 18
     bpp: 4
     glyphs:
-      - "\U000F0A72"   # solar-power
+      - "\U000F1904"   # home-lightning-bolt-outline (Energiefluss)
+      - "\U000F08BB"   # cog-outline (Einstellungen)
+      - "\U000F0141"   # chevron-left (zurück)
+  - file:
+      type: web
+      url: https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf
+    id: font_icon_s
+    size: 14
+    bpp: 4
+    glyphs:
+      - "\U000F05A8"   # white-balance-sunny
+      - "\U000F02DC"   # home
+      - "\U000F0D3E"   # transmission-tower
+      - "\U000F12A3"   # battery-high
+      - "\U000F00F6"   # calendar-today
+      - "\U000F032A"   # leaf
+      - "\U000F05D6"   # alert-circle-outline
 
 # ---------------------------------------------------------------------------
 #  Oberfläche (320 × 240 quer)
-#  Gleiche Widget-IDs wie board-4848s040.yaml – common.yaml befüllt sie.
+#  Gleiche Widget-IDs und Farben wie board-4848s040.yaml – common.yaml befüllt sie.
 # ---------------------------------------------------------------------------
 
 lvgl:
@@ -167,20 +189,39 @@ lvgl:
 
   style_definitions:
     - id: st_card
-      bg_color: 0x1E293B
+      bg_color: 0x111827
       bg_opa: COVER
       radius: 12
-      border_width: 0
+      border_width: 1
+      border_color: 0x1C2638
       pad_all: 8
     - id: st_btn
-      bg_color: 0x334155
-      radius: 8
-      border_width: 0
+      bg_color: 0x141C2E
+      bg_opa: COVER
+      radius: 9
+      border_width: 1
+      border_color: 0x1C2638
       shadow_width: 0
+    - id: st_bare             # unsichtbarer Container (Layout-Hilfe)
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+      radius: 0
+    - id: st_chip
+      bg_color: 0x111827
+      bg_opa: COVER
+      radius: 12
+      border_width: 1
+      border_color: 0x1C2638
+      pad_left: 9
+      pad_right: 9
+      pad_top: 0
+      pad_bottom: 0
     - id: st_node
-      bg_color: 0x1E293B
+      bg_color: 0x111827
+      bg_opa: COVER
       radius: 22
-      border_width: 2
+      border_width: 3
       pad_all: 0
 
   # Update-Popup: liegt über allen Seiten, wird von script update_popup gesteuert
@@ -192,7 +233,7 @@ lvgl:
           width: 100%
           height: 100%
           bg_color: 0x000000
-          bg_opa: 70%
+          bg_opa: 75%
           border_width: 0
           radius: 0
           pad_all: 0
@@ -202,10 +243,7 @@ lvgl:
                 align: CENTER
                 width: 296
                 height: 214
-                bg_color: 0x1E293B
-                bg_opa: COVER
-                border_width: 1
-                border_color: 0x334155
+                styles: st_card
                 radius: 16
                 pad_all: 12
                 scrollable: false
@@ -215,7 +253,7 @@ lvgl:
                       align: TOP_MID
                       text: ""
                       text_font: font_m
-                      text_color: 0xF1F5F9
+                      text_color: 0xF8FAFC
                   - label:
                       id: upd_text
                       align: TOP_MID
@@ -235,7 +273,7 @@ lvgl:
                       min_value: 0
                       max_value: 100
                       value: 0
-                      bg_color: 0x334155
+                      bg_color: 0x1A2335
                       indicator:
                         bg_color: 0x2563EB
                   - label:
@@ -243,15 +281,13 @@ lvgl:
                       hidden: true
                       align: BOTTOM_MID
                       text: ""
-                      text_color: 0x94A3B8
+                      text_color: 0x8391A7
                   - obj:
                       id: upd_buttons
                       align: BOTTOM_MID
                       width: 100%
                       height: 32
-                      bg_opa: TRANSP
-                      border_width: 0
-                      pad_all: 0
+                      styles: st_bare
                       scrollable: false
                       widgets:
                         - button:
@@ -263,13 +299,14 @@ lvgl:
                               - lambda: id(upd_dismissed) = id(fw_update).update_info.latest_version;
                               - script.execute: update_popup
                             widgets:
-                              - label: { align: CENTER, text: "Später", text_color: 0xF1F5F9 }
+                              - label: { align: CENTER, text: "Später", text_color: 0xF8FAFC }
                         - button:
                             align: RIGHT_MID
                             width: 130
                             height: 32
                             styles: st_btn
                             bg_color: 0x2563EB
+                            border_width: 0
                             on_click:
                               - update.perform: fw_update
                             widgets:
@@ -278,139 +315,302 @@ lvgl:
   pages:
     # ======================= Hauptseite =======================
     - id: page_main
-      bg_color: 0x0B1120
+      bg_color: 0x070B14
       widgets:
+        # ---- Kopfzeile: Uhrzeit, Tagesertrag, Status, Navigation ----
         - label:
             id: lbl_time
             x: 10
-            y: 9
+            y: 7
             text: "--:--"
-            text_font: font_m
-            text_color: 0xE2E8F0
-        - label:
-            id: lbl_eday
-            x: 64
-            y: 12
+            text_font: font_l
+            text_color: 0xF8FAFC
+        - label:                       # Datum: auf dem kleinen Display kein Platz
+            id: lbl_date
+            hidden: true
             text: ""
-            text_color: 0x94A3B8
         - obj:
-            id: dot_status
+            styles: st_chip
+            x: 76
+            y: 8
+            width: SIZE_CONTENT
+            height: 24
+            clickable: false
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+              pad_column: 4
+            widgets:
+              - label: { text: "\U000F00F6", text_font: font_icon_s, text_color: 0x8391A7 }
+              - label: { id: lbl_eday, text: "Heute --", text_color: 0xCBD5E1 }
+        - obj:
+            styles: st_bare
             align: TOP_RIGHT
             x: -84
             y: 14
-            width: 8
-            height: 8
-            radius: 4
-            border_width: 0
-            bg_color: 0xEF4444
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            clickable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+              pad_column: 5
+            widgets:
+              - obj:
+                  id: dot_status
+                  width: 8
+                  height: 8
+                  radius: 4
+                  border_width: 0
+                  bg_color: 0xEF4444
+              - label:                 # nur der Punkt – Text hat keinen Platz
+                  id: lbl_status
+                  hidden: true
+                  text: ""
+                  text_color: 0x8391A7
         - button:
             align: TOP_RIGHT
             x: -44
             y: 4
-            width: 32
-            height: 30
+            width: 34
+            height: 32
             styles: st_btn
             on_click:
               - lvgl.page.show: page_flow
             widgets:
-              - label: { align: CENTER, text: "\U000F0A72", text_font: font_icon_s, text_color: 0xFACC15 }
+              - label: { align: CENTER, text: "\U000F1904", text_font: font_icon_m, text_color: 0xFACC15 }
         - button:
             align: TOP_RIGHT
             x: -6
             y: 4
-            width: 32
-            height: 30
+            width: 34
+            height: 32
             styles: st_btn
             on_click:
               - lvgl.page.show: page_settings
             widgets:
-              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+              - label: { align: CENTER, text: "\U000F08BB", text_font: font_icon_m, text_color: 0xCBD5E1 }
 
-        # Links: Ring = PV-Leistung im Verhältnis zur Anlagenleistung
-        - arc:
-            id: arc_pv
-            x: 6
+        # ---- Links: Ring = PV-Leistung im Verhältnis zur Anlagenleistung ----
+        - obj:
+            styles: st_bare
+            x: 4
             y: 42
-            width: 156
-            height: 156
-            min_value: 0
-            max_value: 100
-            value: 0
-            adjustable: false
-            arc_color: 0x1E293B
-            arc_width: 10
-            indicator:
-              arc_color: 0xFACC15
-              arc_width: 10
-            knob:
-              bg_opa: TRANSP
-        - label:
-            align_to: { id: arc_pv, align: CENTER, y: -32 }
-            text: "PV-Leistung"
-            text_color: 0x94A3B8
-        - label:
-            id: lbl_pv
-            align_to: { id: arc_pv, align: CENTER, y: 0 }
-            text: "--"
-            text_font: font_xl
-            text_color: 0xFACC15
-        - label:
-            id: lbl_pv_unit
-            align_to: { id: arc_pv, align: CENTER, y: 30 }
-            text: "kW"
-            text_font: font_m
-            text_color: 0x94A3B8
-        - label:
-            id: lbl_autarkie
-            x: 6
+            width: 160
+            height: 160
+            clickable: false
+            scrollable: false
+            widgets:
+              - arc:
+                  id: arc_pv
+                  align: CENTER
+                  width: 156
+                  height: 156
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  adjustable: false
+                  clickable: false
+                  arc_color: 0x1A2335
+                  arc_width: 12
+                  arc_rounded: true
+                  indicator:
+                    arc_color: 0xFACC15
+                    arc_width: 12
+                    arc_rounded: true
+                  knob:
+                    bg_opa: TRANSP
+                    pad_all: 0
+              - obj:
+                  styles: st_bare
+                  align: CENTER
+                  y: -42
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  clickable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_cross: CENTER
+                    flex_align_track: CENTER
+                    pad_column: 3
+                  widgets:
+                    - label: { text: "\U000F05A8", text_font: font_icon_s, text_color: 0xFACC15 }
+                    - label: { text: "Erzeugung", text_color: 0xFACC15 }
+              - label:
+                  id: lbl_pv
+                  align: CENTER
+                  y: -11
+                  text: "--"
+                  text_font: font_xl
+                  text_color: 0xFDE047
+              - label:
+                  id: lbl_pv_unit
+                  align: CENTER
+                  y: 14
+                  text: "kW"
+                  text_font: font_m
+                  text_color: 0x8391A7
+              - label:                 # "von 14 kWp · 49 %" – im kleinen Ring kein Platz
+                  id: lbl_pv_sub
+                  hidden: true
+                  align: CENTER
+                  y: 32
+                  text: ""
+                  text_color: 0x8391A7
+
+        # Autarkie bzw. Verbindungshinweis unter dem Ring
+        - obj:
+            styles: st_bare
+            x: 4
             y: 206
-            width: 156
-            text_align: CENTER
-            text: ""
-            text_color: 0x4ADE80
+            width: 160
+            height: 26
+            clickable: false
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_main: CENTER
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+            widgets:
+              - obj:
+                  id: chip_autarkie
+                  hidden: true
+                  styles: st_chip
+                  width: SIZE_CONTENT
+                  height: 24
+                  border_color: 0x14532D
+                  clickable: false
+                  scrollable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_cross: CENTER
+                    flex_align_track: CENTER
+                    pad_column: 4
+                  widgets:
+                    - label: { id: ico_autarkie, text: "\U000F032A", text_font: font_icon_s, text_color: 0x4ADE80 }
+                    - label: { id: lbl_autarkie, text: "", text_color: 0x4ADE80 }
 
-        # Rechts: drei Zeilen Haus / Netz / Akku
+        # ---- Rechts: Haus / Netz / Akku ----
         - obj:
             styles: st_card
             x: 168
             y: 42
             width: 146
-            height: 60
+            height: 62
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Haus", text_color: 0x94A3B8 }
-              - label: { id: lbl_load_unit, align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
-              - label: { align: BOTTOM_LEFT, text: "Verbrauch", text_color: 0x64748B }
-              - label: { id: lbl_load, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - obj:
+                  width: 20
+                  height: 20
+                  radius: 10
+                  border_width: 0
+                  pad_all: 0
+                  bg_color: 0x172554
+                  clickable: false
+                  widgets:
+                    - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon_s, text_color: 0x60A5FA }
+              - label: { x: 25, y: 3, text: "Haus", text_color: 0x8391A7 }
+              - label: { align: TOP_RIGHT, y: 3, text: "Verbrauch", text_color: 0x60A5FA }
+              - obj:
+                  styles: st_bare
+                  align: BOTTOM_LEFT
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  clickable: false
+                  layout: { type: flex, flex_flow: ROW, flex_align_cross: END, flex_align_track: CENTER, pad_column: 3 }
+                  widgets:
+                    - label: { id: lbl_load, text: "--", text_font: font_l, text_color: 0xF8FAFC }
+                    - label: { id: lbl_load_unit, text: "kW", text_color: 0x8391A7, pad_bottom: 3 }
         - obj:
             styles: st_card
             x: 168
-            y: 108
+            y: 107
             width: 146
-            height: 60
+            height: 62
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Netz", text_color: 0x94A3B8 }
-              - label: { id: lbl_grid_unit, align: TOP_RIGHT, text: "kW", text_color: 0x64748B }
-              - label: { id: lbl_grid_sub, align: BOTTOM_LEFT, text: "", text_color: 0x64748B }
-              - label: { id: lbl_grid, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - obj:
+                  width: 20
+                  height: 20
+                  radius: 10
+                  border_width: 0
+                  pad_all: 0
+                  bg_color: 0x1E293B
+                  clickable: false
+                  widgets:
+                    - label: { align: CENTER, text: "\U000F0D3E", text_font: font_icon_s, text_color: 0xCBD5E1 }
+              - label: { x: 25, y: 3, text: "Netz", text_color: 0x8391A7 }
+              - label: { id: lbl_grid_sub, align: TOP_RIGHT, y: 3, text: "", text_color: 0x8391A7 }
+              - obj:
+                  styles: st_bare
+                  align: BOTTOM_LEFT
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  clickable: false
+                  layout: { type: flex, flex_flow: ROW, flex_align_cross: END, flex_align_track: CENTER, pad_column: 3 }
+                  widgets:
+                    - label: { id: lbl_grid, text: "--", text_font: font_l, text_color: 0xF8FAFC }
+                    - label: { id: lbl_grid_unit, text: "kW", text_color: 0x8391A7, pad_bottom: 3 }
         - obj:
             styles: st_card
             x: 168
-            y: 174
+            y: 172
             width: 146
-            height: 60
+            height: 62
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Akku", text_color: 0x94A3B8 }
-              - label: { id: lbl_akku_sub, align: TOP_RIGHT, text: "kein Akku", text_color: 0x64748B }
-              - label: { id: lbl_soc, align: BOTTOM_RIGHT, text: "--", text_font: font_l, text_color: 0xF1F5F9 }
+              - obj:
+                  width: 20
+                  height: 20
+                  radius: 10
+                  border_width: 0
+                  pad_all: 0
+                  bg_color: 0x14532D
+                  clickable: false
+                  widgets:
+                    - label: { align: CENTER, text: "\U000F12A3", text_font: font_icon_s, text_color: 0x4ADE80 }
+              - label: { x: 25, y: 3, text: "Akku", text_color: 0x8391A7 }
+              - label: { id: lbl_akku_sub, align: TOP_RIGHT, y: 3, text: "kein Akku", text_color: 0x8391A7 }
+              - obj:
+                  styles: st_bare
+                  align: BOTTOM_LEFT
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  clickable: false
+                  layout: { type: flex, flex_flow: ROW, flex_align_cross: END, flex_align_track: CENTER, pad_column: 3 }
+                  widgets:
+                    - label: { id: lbl_soc, text: "--", text_font: font_l, text_color: 0xF8FAFC }
+                    - label: { text: "%", text_color: 0x8391A7, pad_bottom: 3 }
+              - bar:
+                  id: bar_soc
+                  align: BOTTOM_RIGHT
+                  y: -7
+                  width: 56
+                  height: 6
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  radius: 3
+                  bg_color: 0x1A2335
+                  indicator:
+                    bg_color: 0x4ADE80
+                    radius: 3
 
         # Hinweis bei fehlendem WLAN (überdeckt die rechte Spalte)
         - obj:
             id: hint_box
             styles: st_card
-            bg_color: 0x1E3A8A
+            bg_color: 0x172554
+            border_color: 0x1E3A8A
             x: 168
             y: 42
             width: 146
@@ -422,27 +622,27 @@ lvgl:
                   long_mode: WRAP
                   align: CENTER
                   text_align: CENTER
-                  text_color: 0xF1F5F9
+                  text_color: 0xF8FAFC
                   text: "WLAN einrichten: Mit dem Handy das WLAN „${setup_ssid}“ verbinden (Passwort: ${setup_password}) und den Anweisungen folgen."
 
     # ======================= Ersteinrichtung =======================
     # Wird beim Start gezeigt, solange kein Wechselrichter gespeichert ist.
     # Inhalt setzt das Script setup_render in common.yaml.
     - id: page_setup
-      bg_color: 0x0B1120
+      bg_color: 0x070B14
       widgets:
         - label:
             align: TOP_MID
             y: 8
             text: "Willkommen"
             text_font: font_m
-            text_color: 0xF1F5F9
+            text_color: 0xF8FAFC
         - label:
             id: setup_step
             align: TOP_MID
             y: 32
             text: ""
-            text_color: 0x94A3B8
+            text_color: 0x8391A7
         - label:
             id: setup_text
             align: TOP_MID
@@ -451,13 +651,13 @@ lvgl:
             long_mode: WRAP
             text_align: CENTER
             text: ""
-            text_color: 0xF1F5F9
+            text_color: 0xF8FAFC
         - label:
             id: setup_ip_caption
             align: TOP_MID
             y: 112
             text: ""
-            text_color: 0x94A3B8
+            text_color: 0x8391A7
         - label:
             id: setup_ip
             align: TOP_MID
@@ -474,7 +674,7 @@ lvgl:
             min_value: 0
             max_value: 100
             value: 0
-            bg_color: 0x334155
+            bg_color: 0x1A2335
             indicator:
               bg_color: 0x2563EB
         - label:
@@ -485,7 +685,7 @@ lvgl:
             long_mode: DOT
             text_align: CENTER
             text: ""
-            text_color: 0x94A3B8
+            text_color: 0x8391A7
         - button:
             id: btn_setup_retry
             hidden: true
@@ -493,9 +693,10 @@ lvgl:
             x: -76
             y: -8
             width: 140
-            height: 30
+            height: 32
             styles: st_btn
             bg_color: 0x2563EB
+            border_width: 0
             on_click:
               - lambda: |-
                   id(scan_repair) = false;
@@ -508,19 +709,20 @@ lvgl:
             x: 76
             y: -8
             width: 140
-            height: 30
+            height: 32
             styles: st_btn
             on_click:
               - lambda: id(setup_mode) = false;
               - lvgl.page.show: page_main
               - script.execute: update_popup
             widgets:
-              - label: { align: CENTER, text: "Überspringen", text_color: 0xF1F5F9 }
+              - label: { align: CENTER, text: "Überspringen", text_color: 0xF8FAFC }
 
     # ======================= Energiefluss =======================
-    # Knoten (Ø 44): PV oben, Netz links, Akku rechts, Haus unten; Mitte (160/138)
+    # Knoten (Ø 44): PV oben, Netz links, Akku rechts, Haus unten; Mitte (160/138).
+    # Leitungen und Rahmen färbt das 40-ms-Intervall in common.yaml, sobald Strom fließt.
     - id: page_flow
-      bg_color: 0x0B1120
+      bg_color: 0x070B14
       on_load:
         - lambda: id(flow_active) = true;
       on_unload:
@@ -529,56 +731,59 @@ lvgl:
         - button:
             x: 6
             y: 4
-            width: 32
-            height: 30
+            width: 34
+            height: 32
             styles: st_btn
             on_click:
               - lvgl.page.show: page_main
             widgets:
-              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+              - label: { align: CENTER, text: "\U000F0141", text_font: font_icon_m, text_color: 0xCBD5E1 }
         - label:
             align: TOP_MID
-            y: 9
+            y: 10
             text: "Energiefluss"
             text_font: font_m
-            text_color: 0xF1F5F9
+            text_color: 0xF8FAFC
 
-        - line: { points: ["160, 84", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
-        - line: { points: ["82, 138", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
-        - line: { points: ["238, 138", "160, 138"], line_width: 3, line_color: 0x334155, line_rounded: true }
-        - line: { points: ["160, 138", "160, 192"], line_width: 3, line_color: 0x334155, line_rounded: true }
-        - obj: { x: 155, y: 133, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x475569 }
+        - line: { id: ln_pv,   points: ["160, 84", "160, 138"], line_width: 4, line_color: 0x1E293B, line_rounded: true }
+        - line: { id: ln_grid, points: ["82, 138", "160, 138"], line_width: 4, line_color: 0x1E293B, line_rounded: true }
+        - line: { id: ln_akku, points: ["238, 138", "160, 138"], line_width: 4, line_color: 0x1E293B, line_rounded: true }
+        - line: { id: ln_haus, points: ["160, 138", "160, 192"], line_width: 4, line_color: 0x1E293B, line_rounded: true }
+        - obj: { x: 154, y: 132, width: 12, height: 12, radius: 6, bg_color: 0x070B14, border_width: 2, border_color: 0x475569, clickable: false }
 
         - obj:
+            id: node_pv
             styles: st_node
             x: 138
             y: 40
             width: 44
             height: 44
             border_color: 0xFACC15
-            scrollable: false
+            clickable: false
             widgets:
-              - label: { align: CENTER, text: "\U000F0A72", text_font: font_icon, text_color: 0xFACC15 }
+              - label: { align: CENTER, text: "\U000F0D9C", text_font: font_icon, text_color: 0xFACC15 }
         - obj:
+            id: node_grid
             styles: st_node
             x: 38
             y: 116
             width: 44
             height: 44
-            border_color: 0x94A3B8
-            scrollable: false
+            border_color: 0x475569
+            clickable: false
             widgets:
-              - label: { align: CENTER, text: "\U000F0D3E", text_font: font_icon, text_color: 0x94A3B8 }
+              - label: { align: CENTER, text: "\U000F0D3E", text_font: font_icon, text_color: 0xCBD5E1 }
         - obj:
+            id: node_akku
             styles: st_node
             x: 238
             y: 116
             width: 44
             height: 44
-            border_color: 0x4ADE80
-            scrollable: false
+            border_color: 0x334155
+            clickable: false
             widgets:
-              - label: { align: CENTER, text: "\U000F0079", text_font: font_icon, text_color: 0x4ADE80 }
+              - label: { align: CENTER, text: "\U000F12A3", text_font: font_icon, text_color: 0x4ADE80 }
         - obj:
             styles: st_node
             x: 138
@@ -586,42 +791,44 @@ lvgl:
             width: 44
             height: 44
             border_color: 0x60A5FA
-            scrollable: false
+            clickable: false
             widgets:
               - label: { align: CENTER, text: "\U000F02DC", text_font: font_icon, text_color: 0x60A5FA }
 
-        - label: { id: lbl_f_pv, x: 190, y: 52, text: "--", text_font: font_m, text_color: 0xFACC15 }
-        - label: { id: lbl_f_grid, x: 0, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m }
-        - label: { id: lbl_f_grid_sub, x: 0, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x94A3B8 }
-        - label: { id: lbl_f_soc, x: 200, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0x4ADE80 }
-        - label: { id: lbl_f_akku, x: 200, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x94A3B8 }
-        - label: { id: lbl_f_load, x: 190, y: 205, text: "--", text_font: font_m, text_color: 0x60A5FA }
+        - label: { x: 192, y: 44, text: "Erzeugung", text_color: 0x8391A7 }
+        - label: { id: lbl_f_pv, x: 192, y: 59, text: "--", text_font: font_m, text_color: 0xFDE047 }
+        - label: { id: lbl_f_grid, x: 0, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0xF8FAFC }
+        - label: { id: lbl_f_grid_sub, x: 0, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x8391A7 }
+        - label: { id: lbl_f_soc, x: 200, y: 164, width: 120, text_align: CENTER, text: "--", text_font: font_m, text_color: 0xF8FAFC }
+        - label: { id: lbl_f_akku, x: 200, y: 184, width: 120, text_align: CENTER, text: "", text_color: 0x8391A7 }
+        - label: { x: 192, y: 196, text: "Haus", text_color: 0x8391A7 }
+        - label: { id: lbl_f_load, x: 192, y: 211, text: "--", text_font: font_m, text_color: 0x93C5FD }
 
-        - obj: { id: dot_pv,   hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xFACC15 }
-        - obj: { id: dot_grid, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xF1F5F9 }
-        - obj: { id: dot_akku, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x4ADE80 }
-        - obj: { id: dot_haus, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x60A5FA }
+        - obj: { id: dot_pv,   hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xFDE047, clickable: false }
+        - obj: { id: dot_grid, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0xF8FAFC, clickable: false }
+        - obj: { id: dot_akku, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x4ADE80, clickable: false }
+        - obj: { id: dot_haus, hidden: true, width: 10, height: 10, radius: 5, border_width: 0, bg_color: 0x60A5FA, clickable: false }
 
     # ======================= Einstellungen =======================
     - id: page_settings
-      bg_color: 0x0B1120
+      bg_color: 0x070B14
       widgets:
         - button:
             x: 6
             y: 4
-            width: 32
-            height: 30
+            width: 34
+            height: 32
             styles: st_btn
             on_click:
               - lvgl.page.show: page_main
             widgets:
-              - label: { align: CENTER, text: "", text_font: montserrat_18, text_color: 0xE2E8F0 }
+              - label: { align: CENTER, text: "\U000F0141", text_font: font_icon_m, text_color: 0xCBD5E1 }
         - label:
             align: TOP_MID
-            y: 9
+            y: 10
             text: "Einstellungen"
             text_font: font_m
-            text_color: 0xF1F5F9
+            text_color: 0xF8FAFC
 
         # Wechselrichter
         - obj:
@@ -632,14 +839,15 @@ lvgl:
             height: 78
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter (max. 3)", text_color: 0x94A3B8 }
-              - label: { id: lbl_ip, align: TOP_LEFT, y: 16, width: 196, long_mode: DOT, text: "nicht gesetzt", text_font: font_m, text_color: 0xF1F5F9 }
+              - label: { align: TOP_LEFT, text: "Fronius Wechselrichter (max. 3)", text_color: 0x8391A7 }
+              - label: { id: lbl_ip, align: TOP_LEFT, y: 16, width: 196, long_mode: DOT, text: "nicht gesetzt", text_font: font_m, text_color: 0xF8FAFC }
               - button:
                   align: TOP_RIGHT
                   width: 84
                   height: 30
                   styles: st_btn
                   bg_color: 0x2563EB
+                  border_width: 0
                   on_click:
                     - lambda: fronius_scan::start();
                   widgets:
@@ -653,10 +861,10 @@ lvgl:
                   min_value: 0
                   max_value: 100
                   value: 0
-                  bg_color: 0x334155
+                  bg_color: 0x1A2335
                   indicator:
                     bg_color: 0x2563EB
-              - label: { id: lbl_scan, align: BOTTOM_LEFT, text: "", text_color: 0x94A3B8 }
+              - label: { id: lbl_scan, align: BOTTOM_LEFT, text: "", text_color: 0x8391A7 }
 
         # Helligkeit
         - obj:
@@ -667,7 +875,7 @@ lvgl:
             height: 42
             scrollable: false
             widgets:
-              - label: { align: LEFT_MID, text: "Helligkeit", text_color: 0x94A3B8 }
+              - label: { align: LEFT_MID, text: "Helligkeit", text_color: 0x8391A7 }
               - slider:
                   id: sld_brightness
                   align: RIGHT_MID
@@ -677,6 +885,11 @@ lvgl:
                   min_value: 10
                   max_value: 100
                   value: 80
+                  bg_color: 0x1A2335
+                  indicator:
+                    bg_color: 0x2563EB
+                  knob:
+                    bg_color: 0xF8FAFC
                   on_release:
                     - number.set:
                         id: brightness
@@ -691,12 +904,16 @@ lvgl:
             height: 62
             scrollable: false
             widgets:
-              - label: { align: TOP_LEFT, text: "Automatische Updates", text_color: 0x94A3B8 }
+              - label: { align: TOP_LEFT, text: "Automatische Updates", text_color: 0x8391A7 }
               - switch:
                   id: sw_auto_update
                   align: TOP_RIGHT
                   width: 40
                   height: 20
+                  bg_color: 0x334155
+                  indicator:
+                    checked:
+                      bg_color: 0x2563EB
                   on_change:
                     - if:
                         condition:
@@ -705,7 +922,7 @@ lvgl:
                           - switch.turn_on: auto_update
                         else:
                           - switch.turn_off: auto_update
-              - label: { id: lbl_fw_version, align: BOTTOM_LEFT, y: -14, text: "Version ${fw_version}", text_color: 0xF1F5F9 }
+              - label: { id: lbl_fw_version, align: BOTTOM_LEFT, y: -14, text: "Version ${fw_version}", text_color: 0xF8FAFC }
               - label: { id: lbl_web, align: BOTTOM_LEFT, text: "Web: --", text_color: 0x64748B }
               - button:
                   align: BOTTOM_RIGHT
@@ -731,4 +948,4 @@ lvgl:
                                   ? std::string("Update ") + id(fw_update).update_info.latest_version
                                   : std::string("Aktuell");
                   widgets:
-                    - label: { id: lbl_update_btn, align: CENTER, text: "Updates prüfen", text_color: 0xF1F5F9 }
+                    - label: { id: lbl_update_btn, align: CENTER, text: "Updates prüfen", text_color: 0xF8FAFC }
