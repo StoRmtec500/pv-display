@@ -14,7 +14,7 @@ substitutions:
   #   ESP32-2432S028        nur Micro-USB             (ILI9341)
   #   ESP32-2432S028-7789   Micro-USB + USB-C         (ST7789)
   #   ESP32-2432S028-9342   Micro-USB + USB-C, andere Charge (ILI9342)
-  cyd_model: ESP32-2432S028-7789
+  cyd_model: ESP32-2432S028        # getestet: weißes Bild mit -7789, dieses Board hat ILI9341
   # 90 = USB-Buchse rechts, 270 = USB-Buchse links
   cyd_rotation: "90"
 

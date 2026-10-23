@@ -32,7 +32,9 @@ esphome:
       then:
         - light.turn_on:
             id: backlight
-            brightness: !lambda return id(brightness).state / 100.0f;
+            brightness: !lambda |-
+              const float b = id(brightness).state;
+              return std::isnan(b) || b < 10.0f ? 0.8f : b / 100.0f;
         - lvgl.slider.update:
             id: sld_brightness
             value: !lambda return id(brightness).state;

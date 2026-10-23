@@ -40,6 +40,11 @@ psram:
   mode: octal
   speed: 80MHz
 
+# Log über den USB-C-Anschluss (CH340/UART0). Der Standard USB-Serial-JTAG
+# kollidiert mit GPIO19/20 (Touch-I2C bzw. Display-Daten) und zeigt dann nichts.
+logger:
+  hardware_uart: UART0
+
 # ---------------------------------------------------------------------------
 #  Hardware: Display, Touch, Hintergrundbeleuchtung
 # ---------------------------------------------------------------------------
@@ -67,6 +72,7 @@ output:
   - platform: ledc
     pin: GPIO38
     id: backlight_out
+    frequency: 150Hz      # Wert aus der Board-Referenz
 
 light:
   - platform: monochromatic
