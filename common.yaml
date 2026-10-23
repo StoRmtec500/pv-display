@@ -43,6 +43,12 @@ esphome:
             state:
               checked: !lambda return id(auto_update).state;
         - script.execute: update_ip_label
+        # Gespeicherte Tages-Startwerte (GEN24) übernehmen
+        - lambda: |-
+            pv::base_day = id(e_base_day);
+            pv::base_total[0] = id(e_base_0);
+            pv::base_total[1] = id(e_base_1);
+            pv::base_total[2] = id(e_base_2);
         # Update-Popup bei jeder Statusänderung der Firmware-Entität neu zeichnen –
         # auch während der Installation (die blockiert die normale Anzeige)
         - lambda: |-
@@ -159,6 +165,23 @@ time:
                       - update.perform: fw_update
 
 globals:
+  # Tagesertrag GEN24: Zählerstände zu Tagesbeginn (überstehen einen Neustart)
+  - id: e_base_day
+    type: int
+    restore_value: true
+    initial_value: "0"
+  - id: e_base_0
+    type: float
+    restore_value: true
+    initial_value: "NAN"
+  - id: e_base_1
+    type: float
+    restore_value: true
+    initial_value: "NAN"
+  - id: e_base_2
+    type: float
+    restore_value: true
+    initial_value: "NAN"
   - id: poll_slot                 # welcher Wechselrichter gerade abgefragt wird (-1 = keiner)
     type: int
     initial_value: "-1"
@@ -487,7 +510,17 @@ script:
             fronius_scan::start();
           }
 
-          const pv::Totals t = pv::totals(now);
+          // Datum für den Tagesertrag der GEN24 (Startwert je Tag)
+          const auto clock = id(sntp_time).now();
+          const int today = clock.is_valid() ? clock.year * 10000 + clock.month * 100 + clock.day_of_month : 0;
+          const pv::Totals t = pv::totals(now, today);
+          if (pv::base_dirty) {                        // Startwerte dauerhaft sichern
+            pv::base_dirty = false;
+            id(e_base_day) = pv::base_day;
+            id(e_base_0) = pv::base_total[0];
+            id(e_base_1) = pv::base_total[1];
+            id(e_base_2) = pv::base_total[2];
+          }
 
           // Hinweis unter der PV-Leistung, solange kein Wechselrichter Daten liefert
           // (erst nach 30 s Laufzeit, damit beim Start nichts aufblitzt)
@@ -758,7 +791,7 @@ interval:
           line(0, id(ln_pv)->obj, active(id(p_pv).state), 0xFACC15);
           line(1, id(ln_grid)->obj, active(g), grid_col);
           line(2, id(ln_akku)->obj, active(a), 0x4ADE80);
-          line(3, id(ln_haus)->obj, active(id(p_load).state), 0x60A5FA);
+          line(3, id(ln_haus)->obj, active(id(p_load).state), 0xF87171);
           ring(4, id(node_pv), active(id(p_pv).state) ? 0xFACC15 : 0x475569);
           ring(5, id(node_grid), active(g) ? grid_col : 0x475569);
           ring(6, id(node_akku), active(a) ? 0x4ADE80 : 0x334155);

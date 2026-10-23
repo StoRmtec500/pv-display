@@ -4,7 +4,8 @@
 //
 // Jeder Wechselrichter liefert über seine eigene Solar API Daten in einen
 // "Slot". totals() summiert alle aktuellen Slots:
-//   PV, Akku, Tagesertrag  -> Summe
+//   PV, Akku, Tagesertrag  -> Summe (Tagesertrag je Gerät: E_Day, beim GEN24 aus E_Total;
+//                             PV inkl. Zusatz-Erzeugern an Sekundärzählern des GEN24)
 //   Netz                   -> erster Wert eines Wechselrichters mit Smart Meter
 //                             (es gibt nur einen Netzanschlusspunkt)
 //   Hausverbrauch          -> selbst gerechnet: Netz + PV + Akku
@@ -33,7 +34,8 @@ struct Slot {
   float pv = NAN;
   float grid = NAN;     // > 0 Bezug, < 0 Einspeisung (nur mit Smart Meter)
   float akku = NAN;     // > 0 entlädt, < 0 lädt
-  float eday = NAN;     // Wh
+  float eday = NAN;     // Wh, Symo/Datamanager – beim GEN24 immer null
+  float etotal = NAN;   // Wh, Gesamtzähler (GEN24 liefert nur diesen)
   float soc = NAN;      // %
   uint32_t last_ok = 0;
   uint32_t last_try = 0;
@@ -48,6 +50,11 @@ struct Totals {
 };
 
 inline Slot slots[MAX_INVERTERS];
+
+// Tagesertrag GEN24: Zählerstände zu Tagesbeginn, siehe day_energy()
+inline int base_day = 0;                         // Datum der Startwerte als JJJJMMTT
+inline float base_total[MAX_INVERTERS] = {NAN, NAN, NAN};
+inline bool base_dirty = false;                  // true = Startwerte neu speichern
 
 inline bool is_fresh(const Slot &s, uint32_t now) { return s.last_ok != 0 && now - s.last_ok < MAX_AGE_MS; }
 
@@ -71,8 +78,13 @@ inline void clear(int i) { slots[i] = Slot{}; }
 inline std::string known_ips[MAX_INVERTERS];
 inline void on_ip_changed(int i, const std::string &ip) {
   if (i < 0 || i >= MAX_INVERTERS || known_ips[i] == ip) return;
+  const bool replaced = !known_ips[i].empty();   // beim Start nur übernehmen, nicht zurücksetzen
   known_ips[i] = ip;
   clear(i);
+  if (replaced) {                                // anderes Gerät: dessen Zählerstand gilt nicht
+    base_total[i] = NAN;
+    base_dirty = true;
+  }
 }
 
 static inline float opt(JsonVariantConst v) { return v.isNull() ? NAN : v.as<float>(); }
@@ -87,6 +99,14 @@ inline bool parse(int i, const std::string &body, uint32_t now) {
     parsed.grid = opt(site["P_Grid"]);
     parsed.akku = opt(site["P_Akku"]);
     parsed.eday = opt(site["E_Day"]);
+    parsed.etotal = opt(site["E_Total"]);
+    // Zusätzliche Erzeuger am GEN24 (z. B. Balkonkraftwerk über einen zweiten Zähler,
+    // Kategorie METER_CAT_WR) zählen zur PV-Leistung – sonst fehlen sie im Hausverbrauch.
+    JsonObjectConst secondary = root["Body"]["Data"]["SecondaryMeters"];
+    for (JsonPairConst kv : secondary) {
+      JsonVariantConst p = kv.value()["P"];
+      if (!p.isNull() && kv.value()["Category"] == "METER_CAT_WR") parsed.pv += std::fabs(p.as<float>());
+    }
     JsonObjectConst inverters = root["Body"]["Data"]["Inverters"];
     for (JsonPairConst kv : inverters) {
       JsonVariantConst s = kv.value()["SOC"];
@@ -105,11 +125,36 @@ inline bool parse(int i, const std::string &body, uint32_t now) {
   return true;
 }
 
-inline Totals totals(uint32_t now) {
+// ---------------------------------------------------------------------------
+// Tagesertrag für Geräte ohne E_Day (Fronius GEN24/Tauro):
+// Zählerstand E_Total beim ersten Wert des Tages merken, Ertrag = aktuell - Start.
+// Die Startwerte werden in common.yaml dauerhaft gespeichert (Neustart am Tag).
+// ---------------------------------------------------------------------------
+
+// (Startwerte: base_day / base_total, siehe oben bei den Slots)
+
+// today = JJJJMMTT, 0 = Uhrzeit noch unbekannt
+inline float day_energy(int i, const Slot &s, int today) {
+  if (!std::isnan(s.eday)) return s.eday;        // Gerät liefert den Tageswert selbst
+  if (std::isnan(s.etotal) || today == 0) return NAN;
+  if (base_day != today) {                       // neuer Tag: alle Startwerte verwerfen
+    base_day = today;
+    for (float &b : base_total) b = NAN;
+    base_dirty = true;
+  }
+  if (std::isnan(base_total[i]) || s.etotal < base_total[i]) {  // erster Wert / Zähler getauscht
+    base_total[i] = s.etotal;
+    base_dirty = true;
+  }
+  return s.etotal - base_total[i];
+}
+
+inline Totals totals(uint32_t now, int today = 0) {
   Totals t;
   float soc_sum = 0, eday_sum = 0;
   int soc_n = 0, eday_n = 0;
-  for (const Slot &s : slots) {
+  for (int i = 0; i < MAX_INVERTERS; i++) {
+    const Slot &s = slots[i];
     if (!is_fresh(s, now)) continue;
     t.valid = true;
     t.pv += s.pv;
@@ -125,8 +170,9 @@ inline Totals totals(uint32_t now) {
       soc_sum += s.soc;
       soc_n++;
     }
-    if (!std::isnan(s.eday)) {
-      eday_sum += s.eday;
+    const float e = day_energy(i, s, today);
+    if (!std::isnan(e)) {
+      eday_sum += e;
       eday_n++;
     }
   }

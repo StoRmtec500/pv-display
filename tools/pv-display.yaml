@@ -9,7 +9,7 @@ substitutions:
   fw_version: "0.0.0-dev"           # wird beim Release vom Git-Tag überschrieben
   update_manifest: https://update.mksoft.at/pv-display/manifest.json
   setup_ssid: PV-Display-Setup
-  setup_password: mksoft-setup      # steht in der Kundenanleitung
+  setup_password: 12345      # steht in der Kundenanleitung
 
 esphome:
   name: ${name}
